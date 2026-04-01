@@ -8,17 +8,17 @@ export default function LeftPanel() {
   const { activeLeftPanel } = state;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: 'var(--layer-panel-w)', background: 'var(--surface)', overflow: 'hidden' }}>
+    <div className="layer-panel">
       {/* Tabs */}
-      <div style={{ display: 'flex', flexShrink: 0, background: 'linear-gradient(180deg, #ECE9D8 0%, #D4D2C7 100%)', padding: '6px 6px 0', borderBottom: '1px solid #919B9C' }}>
+      <div className="layer-panel-tabs">
         <button
-          className={`left-panel-tab ${activeLeftPanel === 'layers' ? 'left-panel-tab--active' : ''}`}
+          className={`tab-btn ${activeLeftPanel === 'layers' ? 'tab-btn--active' : ''}`}
           onClick={() => dispatch({ type: 'SET_ACTIVE_LEFT_PANEL', panel: 'layers' })}
         >
           Layers
         </button>
         <button
-          className={`left-panel-tab ${activeLeftPanel === 'motionPaths' ? 'left-panel-tab--active' : ''}`}
+          className={`tab-btn ${activeLeftPanel === 'motionPaths' ? 'tab-btn--active' : ''}`}
           onClick={() => dispatch({ type: 'SET_ACTIVE_LEFT_PANEL', panel: 'motionPaths' })}
         >
           Motion Paths

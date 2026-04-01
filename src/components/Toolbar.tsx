@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { ArrowCounterClockwise, ArrowClockwise } from '@phosphor-icons/react';
 import { useApp } from '../context/AppContext';
+import ThemePicker from './ThemePicker';
 import { parseSvgLayers } from '../utils/svgParser';
 import { exportAnimatedSvg, downloadSvg, extractProjectMetadata } from '../utils/exporter';
 
@@ -255,6 +256,10 @@ export default function Toolbar() {
         <button className="btn btn-primary" onClick={handleExport} disabled={!state.svgSource}>
           Export SVG
         </button>
+      </div>
+
+      <div className="toolbar-group">
+        <ThemePicker />
       </div>
     </div>
   );
