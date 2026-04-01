@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { ThemeProvider } from './context/ThemeContext';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
 import Canvas from './components/Canvas';
@@ -109,6 +110,7 @@ export default function App() {
   }, []);
 
   return (
+    <ThemeProvider>
     <AppProvider>
       <KeyboardShortcuts />
       <div
@@ -155,5 +157,6 @@ export default function App() {
         <Timeline />
       </div>
     </AppProvider>
+    </ThemeProvider>
   );
 }
