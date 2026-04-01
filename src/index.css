@@ -26,7 +26,7 @@
   --input-radius: 4px;
   --selection-bg: var(--accent-dim);
   --selection-text: var(--accent);
-  --canvas-bg: #1a1a1a;
+  --canvas-bg: #000000;
   --panel-header-bg: var(--surface);
   --panel-header-text: var(--text-muted);
   --toolbar-bg: var(--surface);

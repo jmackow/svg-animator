@@ -47,7 +47,6 @@ export default function ThemePicker() {
               }}
             >
               <span className="theme-picker-option-label">{t.label}</span>
-              <span className="theme-picker-option-desc">{t.description}</span>
             </button>
           ))}
         </div>
