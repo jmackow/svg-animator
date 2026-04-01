@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "WebSearch",
+      "Bash(grep -n \"easing: ''ease''\" /Users/jaroslawmackow/Documents/Projects/Code/svg-animator/src/context/AppContext.tsx /Users/jaroslawmackow/Documents/Projects/Code/svg-animator/src/components/Timeline.tsx)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(grep -n \"SELECT_KEYFRAME\\\\b\" /Users/jaroslawmackow/Documents/Projects/Code/svg-animator/src/components/*.tsx /Users/jaroslawmackow/Documents/Projects/Code/svg-animator/src/context/*.tsx)",
+      "Bash(node -e \"require\\(''''@phosphor-icons/react''''\\)\")"
+    ]
+  }
+}
