@@ -10,7 +10,7 @@ export default function LeftPanel() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: 'var(--layer-panel-w)', background: 'var(--surface)', overflow: 'hidden' }}>
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '2px solid var(--raised-shadow)', flexShrink: 0, background: 'var(--surface2)', padding: '4px 4px 0' }}>
+      <div style={{ display: 'flex', flexShrink: 0, background: 'linear-gradient(180deg, #ECE9D8 0%, #D4D2C7 100%)', padding: '6px 6px 0', borderBottom: '1px solid #919B9C' }}>
         <button
           className={`left-panel-tab ${activeLeftPanel === 'layers' ? 'left-panel-tab--active' : ''}`}
           onClick={() => dispatch({ type: 'SET_ACTIVE_LEFT_PANEL', panel: 'layers' })}
