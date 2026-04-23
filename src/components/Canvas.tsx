@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { GradientDef } from '../types';
-import { interpolateTracks, unpackColor } from '../utils/interpolate';
+import { getLayerValues, unpackColor } from '../utils/interpolate';
 
 function applyGradientToDefs(svgEl: SVGSVGElement, gradId: string, grad: GradientDef): string {
   const ns = 'http://www.w3.org/2000/svg';
@@ -39,6 +39,9 @@ function removeGradFromDefs(svgEl: SVGSVGElement, gradId: string) {
 import TransformOverlay from './TransformOverlay';
 import MotionPathOverlay from './MotionPathOverlay';
 import CmdHoverOverlay from './CmdHoverOverlay';
+import PathPointOverlay from './PathPointOverlay';
+import SnapGuideOverlay from './SnapGuideOverlay';
+import { SnapProvider } from '../context/SnapContext';
 
 // Parse the first M coordinate from an SVG path data string
 function parsePathStart(d: string): { x: number; y: number } | null {
@@ -77,21 +80,94 @@ function svgColorToHex(color: string): string | undefined {
   return undefined;
 }
 
+function isInputEl(el: Element | null): boolean {
+  return (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLElement && el.isContentEditable)
+  );
+}
+
 export default function Canvas() {
   const { state, dispatch } = useApp();
   const svgContainerRef = useRef<HTMLDivElement>(null);
   const canvasFrameRef = useRef<HTMLDivElement>(null);
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
   const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null);
+
+  // Pan state
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const panXRef = useRef(0);
+  const panYRef = useRef(0);
+  const spaceHeldRef = useRef(false);
+  const mouseOverCanvasRef = useRef(false);
+  const panDragRef = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
+  const pannedRef = useRef(false);
+  const canvasZoomRef = useRef(state.canvasZoom);
 
   // Stable refs so event handlers don't go stale across layer/time changes
   const layersRef = useRef(state.layers);
   const motionPathsRef = useRef(state.motionPaths);
+  const stateRef = useRef(state);
   const enteredGroupIdRef = useRef<string | null>(null);
   const cmdHoverLayerIdLocalRef = useRef<string | null>(null); // local dedup
 
   useEffect(() => { layersRef.current = state.layers; }, [state.layers]);
   useEffect(() => { motionPathsRef.current = state.motionPaths; }, [state.motionPaths]);
+  useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { enteredGroupIdRef.current = enteredGroupId; }, [enteredGroupId]);
+  useEffect(() => { panXRef.current = panX; }, [panX]);
+  useEffect(() => { panYRef.current = panY; }, [panY]);
+  useEffect(() => { canvasZoomRef.current = state.canvasZoom; }, [state.canvasZoom]);
+
+  // Space key → pan mode. Use capture phase so we intercept before App's play/pause handler,
+  // but only when mouse is actually over the canvas.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === ' ' && mouseOverCanvasRef.current && !isInputEl(document.activeElement)) {
+        if (!spaceHeldRef.current) {
+          spaceHeldRef.current = true;
+          setSpaceHeld(true);
+        }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key === ' ' && spaceHeldRef.current) {
+        spaceHeldRef.current = false;
+        setSpaceHeld(false);
+        panDragRef.current = null;
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    window.addEventListener('keyup', onKeyUp, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
+      window.removeEventListener('keyup', onKeyUp, { capture: true });
+    };
+  }, []);
+
+  // Wheel → zoom (ctrl/meta) or touchpad pan (plain scroll)
+  useEffect(() => {
+    const el = canvasAreaRef.current;
+    if (!el) return;
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        dispatch({ type: 'SET_CANVAS_ZOOM', zoom: canvasZoomRef.current * factor });
+      } else {
+        setPanX((px) => px - e.deltaX);
+        setPanY((py) => py - e.deltaY);
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [dispatch]);
 
   const applyTransforms = useCallback(() => {
     const container = svgContainerRef.current;
@@ -110,7 +186,7 @@ export default function Canvas() {
       }
       s.display = '';
 
-      const vals = interpolateTracks(layer.tracks, state.currentTime);
+      const vals = getLayerValues(layer, state.currentTime);
       s.transformBox = 'fill-box';
       const ax = layer.anchorX ?? 0;
       const ay = layer.anchorY ?? 0;
@@ -296,6 +372,7 @@ export default function Canvas() {
 
     function handleClick(e: MouseEvent) {
       const target = e.target as Element;
+      dispatch({ type: 'SET_SELECTED_MOTION_PATH', id: null });
       if (e.metaKey || e.ctrlKey) {
         const layer = findLayer(target);
         dispatch({ type: 'SELECT_LAYER', layerId: layer?.id ?? null });
@@ -314,8 +391,18 @@ export default function Canvas() {
         }
         return;
       }
-      const layer = findLayer(target);
-      dispatch({ type: 'SELECT_LAYER', layerId: layer?.id ?? null });
+      const clickedLayer = findLayer(target);
+      if (!clickedLayer) {
+        // Clicking SVG background — if a path-like layer is currently selected (anchor edit mode),
+        // just clear the selected point rather than deselecting the whole layer.
+        const cur = layersRef.current.find(l => l.id === stateRef.current.selectedLayerId);
+        const isPathLike = cur && ['path', 'polyline', 'polygon', 'rect', 'circle', 'ellipse'].includes(cur.tagName.toLowerCase());
+        if (isPathLike) {
+          dispatch({ type: 'SELECT_POINT', pointId: null });
+          return;
+        }
+      }
+      dispatch({ type: 'SELECT_LAYER', layerId: clickedLayer?.id ?? null });
     }
 
     function handleDblClick(e: MouseEvent) {
@@ -368,27 +455,62 @@ export default function Canvas() {
       svgEl.removeEventListener('mouseleave', handleMouseLeave);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [state.svgSource, dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state.svgSource, state.canvasWidth, state.canvasHeight, dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { canvasZoom } = state;
 
-  function handleWheel(e: React.WheelEvent) {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      dispatch({ type: 'SET_CANVAS_ZOOM', zoom: canvasZoom * factor });
+  function handleCanvasAreaClick(e: React.MouseEvent) {
+    if (pannedRef.current) { pannedRef.current = false; return; }
+    if (!canvasFrameRef.current?.contains(e.target as Node)) {
+      dispatch({ type: 'SELECT_LAYER', layerId: null });
+      dispatch({ type: 'SET_SELECTED_MOTION_PATH', id: null });
     }
   }
 
-  function handleCanvasAreaClick(e: React.MouseEvent) {
-    // Deselect when clicking outside the canvas frame (gray background)
-    if (!canvasFrameRef.current?.contains(e.target as Node)) {
-      dispatch({ type: 'SELECT_LAYER', layerId: null });
+  function handleCanvasMouseDown(e: React.MouseEvent) {
+    if (!spaceHeldRef.current || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pannedRef.current = false;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startPanX = panXRef.current;
+    const startPanY = panYRef.current;
+    panDragRef.current = { startX, startY, startPanX, startPanY };
+    setIsPanning(true);
+
+    function onMouseMove(mv: MouseEvent) {
+      if (!panDragRef.current) return;
+      const dx = mv.clientX - panDragRef.current.startX;
+      const dy = mv.clientY - panDragRef.current.startY;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) pannedRef.current = true;
+      const nx = panDragRef.current.startPanX + dx;
+      const ny = panDragRef.current.startPanY + dy;
+      panXRef.current = nx;
+      panYRef.current = ny;
+      setPanX(nx);
+      setPanY(ny);
     }
+    function onMouseUp() {
+      panDragRef.current = null;
+      setIsPanning(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    }
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   }
 
   return (
-    <div className="canvas-area" onWheel={handleWheel} onClick={handleCanvasAreaClick}>
+    <div
+      ref={canvasAreaRef}
+      className="canvas-area"
+      style={{ cursor: spaceHeld ? (isPanning ? 'grabbing' : 'grab') : undefined }}
+      onClick={handleCanvasAreaClick}
+      onMouseDown={handleCanvasMouseDown}
+      onMouseEnter={() => { mouseOverCanvasRef.current = true; }}
+      onMouseLeave={() => { mouseOverCanvasRef.current = false; }}
+    >
       {enteredGroupId && (
         <div className="canvas-group-breadcrumb">
           Inside: <strong>{state.layers.find((l) => l.id === enteredGroupId)?.label ?? 'Group'}</strong>
@@ -401,7 +523,7 @@ export default function Canvas() {
           <div>Import an SVG to get started</div>
         </div>
       ) : (
-        <div className="canvas-viewport">
+        <div className="canvas-viewport" style={{ transform: `translate(${panX}px, ${panY}px)` }}>
           {/* Layout wrapper sized to the zoomed canvas so scrolling works */}
           <div style={{ width: state.canvasWidth * canvasZoom, height: state.canvasHeight * canvasZoom, flexShrink: 0, position: 'relative' }}>
             <div
@@ -417,24 +539,32 @@ export default function Canvas() {
                 left: 0,
               }}
             >
-              <div ref={svgContainerRef} className="svg-host" />
-              <TransformOverlay
-                svgContainerRef={svgContainerRef}
-                canvasWidth={state.canvasWidth}
-                canvasHeight={state.canvasHeight}
-              />
-              <CmdHoverOverlay
-                svgContainerRef={svgContainerRef}
-                canvasWidth={state.canvasWidth}
-                canvasHeight={state.canvasHeight}
-              />
-              <MotionPathOverlay
-                svgContainerRef={svgContainerRef}
-                canvasFrameRef={canvasFrameRef}
-                canvasWidth={state.canvasWidth}
-                canvasHeight={state.canvasHeight}
-                canvasZoom={state.canvasZoom}
-              />
+              <SnapProvider>
+                <div ref={svgContainerRef} className="svg-host" />
+                <TransformOverlay
+                  svgContainerRef={svgContainerRef}
+                  canvasWidth={state.canvasWidth}
+                  canvasHeight={state.canvasHeight}
+                />
+                <CmdHoverOverlay
+                  svgContainerRef={svgContainerRef}
+                  canvasWidth={state.canvasWidth}
+                  canvasHeight={state.canvasHeight}
+                />
+                <MotionPathOverlay
+                  svgContainerRef={svgContainerRef}
+                  canvasFrameRef={canvasFrameRef}
+                  canvasWidth={state.canvasWidth}
+                  canvasHeight={state.canvasHeight}
+                  canvasZoom={state.canvasZoom}
+                />
+                <PathPointOverlay
+                  svgContainerRef={svgContainerRef}
+                  canvasFrameRef={canvasFrameRef}
+                  canvasZoom={state.canvasZoom}
+                />
+                <SnapGuideOverlay canvasWidth={state.canvasWidth} canvasHeight={state.canvasHeight} />
+              </SnapProvider>
             </div>
           </div>
         </div>

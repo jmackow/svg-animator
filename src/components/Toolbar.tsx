@@ -1,20 +1,36 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { ArrowCounterClockwise, ArrowClockwise } from '@phosphor-icons/react';
 import { useApp } from '../context/AppContext';
+import { emptyTracks } from '../context/AppContext';
 import ThemePicker from './ThemePicker';
 import { parseSvgLayers } from '../utils/svgParser';
 import { exportAnimatedSvg, downloadSvg, extractProjectMetadata } from '../utils/exporter';
+import { stripIds, appendSvgChildrenToExisting, appendRawElementToSvg, createMinimalSvg } from '../utils/svgDom';
+import { Layer } from '../types';
 
 export default function Toolbar() {
   const { state, dispatch, canUndo, canRedo } = useApp();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const svgFileRef = useRef<HTMLInputElement>(null);
+  const imageFileRef = useRef<HTMLInputElement>(null);
+  const importBtnRef = useRef<HTMLDivElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [canvasW, setCanvasW] = useState(String(state.canvasWidth));
   const [canvasH, setCanvasH] = useState(String(state.canvasHeight));
   const [duration, setDuration] = useState(String(state.duration));
   const loop: 'none' | 'infinite' = state.loopPlayback ? 'infinite' : 'none';
   function setLoop(l: 'none' | 'infinite') { dispatch({ type: 'SET_LOOP_PLAYBACK', loop: l === 'infinite' }); }
 
-  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (importBtnRef.current && !importBtnRef.current.contains(e.target as Node)) {
+        setImportOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, []);
+
+  function handleSvgImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -35,15 +51,62 @@ export default function Toolbar() {
           setDuration(String(saved.duration));
           setCanvasW(String(saved.canvasWidth));
           setCanvasH(String(saved.canvasHeight));
-        } else {
+        } else if (state.svgSource === null) {
           const { layers, source } = parseSvgLayers(text);
           dispatch({ type: 'LOAD_SVG', svgSource: source, layers });
+        } else {
+          const stripped = stripIds(text);
+          const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
+          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, newSource);
+          dispatch({ type: 'MERGE_LAYERS', newLayers, newSvgSource: mergedSvg });
         }
       } catch {
         alert('Failed to parse SVG file.');
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  function handleImageImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const W = img.naturalWidth || state.canvasWidth;
+        const H = img.naturalHeight || state.canvasHeight;
+        const label = file.name.replace(/\.[^.]+$/, '');
+        const elemId = `svga-img-${Date.now()}`;
+        const imageTag = `<image id="${elemId}" href="${dataUrl}" x="0" y="0" width="${W}" height="${H}" />`;
+
+        const newLayer: Layer = {
+          id: elemId,
+          elementId: elemId,
+          tagName: 'image',
+          label,
+          tracks: emptyTracks(),
+          visible: true,
+          locked: false,
+          expanded: false,
+          anchorX: 0,
+          anchorY: 0,
+          autoRotate: false,
+        };
+
+        if (state.svgSource === null) {
+          const svgSource = createMinimalSvg(W, H, imageTag);
+          dispatch({ type: 'LOAD_SVG', svgSource, layers: [newLayer] });
+        } else {
+          const newSvgSource = appendRawElementToSvg(state.svgSource, imageTag);
+          dispatch({ type: 'MERGE_LAYERS', newLayers: [newLayer], newSvgSource });
+        }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
     e.target.value = '';
   }
 
@@ -66,7 +129,6 @@ export default function Toolbar() {
   function handleExport() {
     if (!state.svgSource) return;
 
-    // Compute motion path origin adjustments from the live SVG DOM
     const motionAdjustments = new Map<string, { x: number; y: number }>();
     const liveSvg = document.querySelector('.svg-host svg') as SVGSVGElement | null;
     if (liveSvg) {
@@ -124,10 +186,29 @@ export default function Toolbar() {
   return (
     <div className="toolbar">
       <div className="toolbar-group">
-        <button className="btn" onClick={() => fileRef.current?.click()}>
-          Import SVG
-        </button>
-        <input ref={fileRef} type="file" accept=".svg,image/svg+xml" onChange={handleImport} style={{ display: 'none' }} />
+        <div className="import-btn-group" ref={importBtnRef}>
+          <button className="btn" onClick={() => setImportOpen(o => !o)}>
+            Import ▾
+          </button>
+          {importOpen && (
+            <div className="import-dropdown">
+              <button
+                className="import-dropdown-item"
+                onClick={() => { setImportOpen(false); svgFileRef.current?.click(); }}
+              >
+                SVG
+              </button>
+              <button
+                className="import-dropdown-item"
+                onClick={() => { setImportOpen(false); imageFileRef.current?.click(); }}
+              >
+                Image
+              </button>
+            </div>
+          )}
+        </div>
+        <input ref={svgFileRef} type="file" accept=".svg,image/svg+xml" onChange={handleSvgImport} style={{ display: 'none' }} />
+        <input ref={imageFileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={handleImageImport} style={{ display: 'none' }} />
       </div>
 
       <div className="toolbar-group">

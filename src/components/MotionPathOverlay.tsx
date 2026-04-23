@@ -179,7 +179,7 @@ export default function MotionPathOverlay({
   svgContainerRef, canvasFrameRef, canvasWidth, canvasHeight, canvasZoom
 }: Props) {
   const { state, dispatch } = useApp();
-  const { motionPaths, drawingMotionPathId, selectedMotionPathId } = state;
+  const { motionPaths, drawingMotionPathId, selectedMotionPathId, activeLeftPanel } = state;
 
   const isDrawing = drawingMotionPathId !== null;
 
@@ -410,6 +410,7 @@ export default function MotionPathOverlay({
       {/* Existing motion paths */}
       {map && motionPaths.map(mp => {
         const isSelected = mp.id === selectedMotionPathId;
+        const isVisible = mp.visible !== false;
         const nodes = isSelected ? parsePathNodes(mp.d) : [];
 
         // Build canvas-space path for rendering
@@ -417,19 +418,18 @@ export default function MotionPathOverlay({
 
         return (
           <g key={mp.id}>
-            {canvasD && (
+            {canvasD && isVisible && (
               <path
                 d={canvasD}
                 fill="none"
                 stroke={isSelected ? '#7c6cf7' : '#7c6cf755'}
                 strokeWidth={isSelected ? 1.5 : 1}
                 strokeDasharray="5,3"
-                style={{ pointerEvents: isDrawing ? 'none' : 'all', cursor: 'pointer' }}
+                style={{ pointerEvents: isDrawing || activeLeftPanel !== 'motionPaths' ? 'none' : 'all', cursor: 'pointer' }}
                 onClick={(e) => {
-                  if (!isDrawing) {
+                  if (!isDrawing && activeLeftPanel === 'motionPaths') {
                     e.stopPropagation();
                     dispatch({ type: 'SET_SELECTED_MOTION_PATH', id: mp.id });
-                    dispatch({ type: 'SET_ACTIVE_LEFT_PANEL', panel: 'motionPaths' });
                   }
                 }}
               />

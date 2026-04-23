@@ -1,4 +1,4 @@
-import { PropertyKeyframe, AnimatableProperty, PROPERTY_DEFAULTS, PropertyTracks } from '../types';
+import { PropertyKeyframe, AnimatableProperty, PROPERTY_DEFAULTS, PropertyTracks, Layer } from '../types';
 import { evaluateEasing } from './easing';
 
 // ─── Color helpers ────────────────────────────────────────────────────────────
@@ -72,6 +72,18 @@ export function interpolateTracks(
   const result = {} as Record<AnimatableProperty, number>;
   for (const prop of Object.keys(PROPERTY_DEFAULTS) as AnimatableProperty[]) {
     result[prop] = interpolateProperty(tracks[prop], time, PROPERTY_DEFAULTS[prop], prop);
+  }
+  return result;
+}
+
+export function getLayerValues(layer: Layer, time: number): Record<AnimatableProperty, number> {
+  const result = {} as Record<AnimatableProperty, number>;
+  for (const prop of Object.keys(PROPERTY_DEFAULTS) as AnimatableProperty[]) {
+    if (layer.tracks[prop].length > 0) {
+      result[prop] = interpolateProperty(layer.tracks[prop], time, PROPERTY_DEFAULTS[prop], prop);
+    } else {
+      result[prop] = (layer.baseValues?.[prop] as number | undefined) ?? PROPERTY_DEFAULTS[prop];
+    }
   }
   return result;
 }

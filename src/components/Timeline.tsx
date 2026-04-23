@@ -39,7 +39,7 @@ export default function Timeline() {
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [snapTarget, setSnapTarget] = useState<number | null>(null);
 
-  const { zoom, duration, currentTime, isPlaying, loopPlayback, layers, snapEnabled, selectedKeyframes } = state;
+  const { zoom, duration, currentTime, isPlaying, loopPlayback, layers, snapEnabled, selectedKeyframes, selectedPathKfIds } = state;
 
   // ── Playback loop ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -92,6 +92,9 @@ export default function Timeline() {
           times.push(kf.time);
         }
       }
+      for (const kf of layer.pathKeyframes ?? []) {
+        times.push(kf.time);
+      }
     }
     return times;
   }, [layers]);
@@ -107,11 +110,13 @@ export default function Timeline() {
         for (const kf of layer.tracks[prop]) {
           if (excludeIds?.has(kf.id)) continue;
           const dist = Math.abs(kf.time - t);
-          if (dist < bestDist) {
-            bestDist = dist;
-            best = kf.time;
-          }
+          if (dist < bestDist) { bestDist = dist; best = kf.time; }
         }
+      }
+      for (const kf of layer.pathKeyframes ?? []) {
+        if (excludeIds?.has(kf.id)) continue;
+        const dist = Math.abs(kf.time - t);
+        if (dist < bestDist) { bestDist = dist; best = kf.time; }
       }
     }
 
@@ -250,10 +255,49 @@ export default function Timeline() {
     window.addEventListener('mouseup', onUp);
   }
 
+  // ── Path keyframe drag ────────────────────────────────────────────────────
+  function startPathKfDrag(e: React.MouseEvent, layerId: string, kfId: string, kfTime: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.shiftKey) {
+      dispatch({ type: 'ADD_TO_PATH_KF_SELECTION', kfIds: [kfId] });
+    } else {
+      dispatch({ type: 'SELECT_PATH_KEYFRAMES', kfIds: [kfId] });
+    }
+    dispatch({ type: 'SET_TIME', time: kfTime });
+
+    const startMouseX = e.clientX;
+    const startTime = kfTime;
+    const excludeIds = new Set([kfId]);
+    let moved = false;
+
+    function onMove(mv: MouseEvent) {
+      const pixelDelta = mv.clientX - startMouseX;
+      if (!moved && Math.abs(pixelDelta) < 2) return;
+      moved = true;
+      const proposed = startTime + pixelDelta / zoom;
+      const { time: snapped, snapTo } = snapTime(proposed, excludeIds);
+      setSnapTarget(snapTo);
+      dispatch({ type: 'MOVE_PATH_KEYFRAME_SILENT', layerId, keyframeId: kfId, time: Math.max(0, Math.min(duration, snapped)) });
+    }
+    function onUp(mv: MouseEvent) {
+      setSnapTarget(null);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (!moved) return;
+      const pixelDelta = mv.clientX - startMouseX;
+      const proposed = startTime + pixelDelta / zoom;
+      const { time: snapped } = snapTime(proposed, excludeIds);
+      dispatch({ type: 'MOVE_PATH_KEYFRAME', layerId, keyframeId: kfId, time: Math.max(0, Math.min(duration, snapped)) });
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   // ── Marquee drag select ────────────────────────────────────────────────────
-  function startMarqueeDrag(e: React.MouseEvent<HTMLDivElement>, trackAreaTopY: number) {
-    // Only start if not on a diamond
-    if ((e.target as HTMLElement).classList.contains('keyframe-diamond')) return;
+  function startMarqueeDrag(e: React.MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, .keyframe-diamond')) return;
     e.preventDefault();
 
     const timeline = timelineRef.current!;
@@ -281,9 +325,9 @@ export default function Timeline() {
 
       // Only select if it was a real drag (not a click)
       if (Math.abs(endX - startX) > 4 || Math.abs(endY - startY) > 4) {
-        // Find all KFs whose time falls in [minTime, maxTime] and whose row is in [minY, maxY]
         const selected: SelectedKeyframe[] = [];
-        let rowY = RULER_HEIGHT;
+        const selectedPathIds: string[] = [];
+        let rowY = 0;
 
         for (const layer of visibleTimelineLayers) {
           rowY += LAYER_HEADER_HEIGHT;
@@ -301,12 +345,27 @@ export default function Timeline() {
                 rowY += TRACK_HEIGHT;
               }
             }
+            // Path keyframe rows
+            if ((layer.pathKeyframes?.length ?? 0) > 0) {
+              for (const pt of layer.pathKeyframes![0].points) {
+                const ptKfs = layer.pathKeyframes!.filter(kf => kf.movedPointIds?.includes(pt.id));
+                if (ptKfs.length === 0) continue;
+                const rowCenter = rowY + TRACK_HEIGHT / 2;
+                if (rowCenter >= minY && rowCenter <= maxY) {
+                  for (const kf of ptKfs) {
+                    if (kf.time >= minTime && kf.time <= maxTime) {
+                      selectedPathIds.push(kf.id);
+                    }
+                  }
+                }
+                rowY += TRACK_HEIGHT;
+              }
+            }
           }
         }
 
-        if (selected.length > 0) {
-          dispatch({ type: 'SELECT_KEYFRAMES', kfs: selected });
-        }
+        if (selected.length > 0) dispatch({ type: 'SELECT_KEYFRAMES', kfs: selected });
+        if (selectedPathIds.length > 0) dispatch({ type: 'SELECT_PATH_KEYFRAMES', kfIds: [...new Set(selectedPathIds)] });
       }
 
       setMarquee(null);
@@ -396,6 +455,12 @@ export default function Timeline() {
           </button>
         </div>
         {ticks}
+        {/* Playhead — lives on the ruler so it never scrolls away */}
+        <div
+          className="playhead"
+          style={{ left: playheadX, overflow: 'visible', height: '100vh' }}
+          onMouseDown={startPlayheadDrag}
+        />
       </div>
     );
   }
@@ -412,7 +477,6 @@ export default function Timeline() {
         className="timeline-track timeline-track--property"
         style={{ height: TRACK_HEIGHT }}
         onDoubleClick={(e) => handleTrackDoubleClick(e, layerId, property)}
-        onMouseDown={(e) => startMarqueeDrag(e, 0)}
       >
         {/* Gutter */}
         <div className="track-label track-label--property" style={{ width: LEFT_GUTTER }}>
@@ -518,6 +582,7 @@ export default function Timeline() {
     const layer = layers.find((l) => l.id === layerId);
     if (!layer) return false;
     if (ALL_PROPERTIES.some((p) => layer.tracks[p].length >= 1)) return true;
+    if ((layer.pathKeyframes?.length ?? 0) >= 1) return true;
     return layers.some((l) => l.parentId === layerId && hasAnimatedContent(l.id));
   }
 
@@ -551,9 +616,10 @@ export default function Timeline() {
   const snapIndicatorLeft = snapTarget !== null ? LEFT_GUTTER + snapTarget * zoom : null;
 
   return (
-    <div className="timeline-panel" onWheel={handleWheel} ref={timelineRef}>
+    <div className="timeline-panel" onWheel={handleWheel}>
       {renderRuler()}
 
+      <div className="timeline-body" ref={timelineRef} style={{ overflow: 'auto', flex: 1 }} onMouseDown={startMarqueeDrag}>
       <div className="timeline-tracks" style={{ width: totalWidth, position: 'relative' }}>
         {/* Marquee selection rect */}
         {marqueeRect && marqueeRect.width > 2 && (
@@ -561,7 +627,7 @@ export default function Timeline() {
             className="timeline-marquee"
             style={{
               left: marqueeRect.left,
-              top: marqueeRect.top - RULER_HEIGHT,
+              top: marqueeRect.top,
               width: marqueeRect.width,
               height: marqueeRect.height,
             }}
@@ -632,10 +698,45 @@ export default function Timeline() {
                 </div>
 
                 {/* Property tracks — only for properties that have keyframes */}
-                {(layer.expanded || isSelectedLayer) &&
+                {layer.expanded &&
                   ALL_PROPERTIES
                     .filter((property) => layer.tracks[property].length > 0)
                     .map((property) => renderPropertyTrack(layer.id, property))}
+
+                {/* Shape tracks — one row per point (only points with explicit moves) */}
+                {layer.expanded && (layer.pathKeyframes?.length ?? 0) > 0 && (<>
+                  {/* Per-point rows — only for points that have been explicitly moved */}
+                  {layer.pathKeyframes![0].points.map((pt, ptIdx) => {
+                    const ptKfs = layer.pathKeyframes!.filter(kf => kf.movedPointIds?.includes(pt.id));
+                    if (ptKfs.length === 0) return null;
+                    return (
+                      <div
+                        key={`${layer.id}-pt-${pt.id}`}
+                        className="timeline-track timeline-track--property"
+                        style={{ height: TRACK_HEIGHT }}
+                      >
+                        <div className="track-label track-label--property" style={{ width: LEFT_GUTTER }}>
+                          <span className="track-prop-name">Pt {ptIdx + 1}</span>
+                        </div>
+                        <div className="track-area" style={{ position: 'relative' }}>
+                          {ptKfs.map(kf => {
+                            const isSelected = selectedPathKfIds.includes(kf.id);
+                            return (
+                              <div
+                                key={kf.id}
+                                className={`keyframe-diamond ${isSelected ? 'keyframe-diamond--selected' : ''}`}
+                                style={{ left: kf.time * zoom, background: isSelected ? '#a89ff7' : '#7c6cf7' }}
+                                title={`Pt ${ptIdx + 1} @ ${kf.time.toFixed(2)}s`}
+                                onMouseDown={(e) => startPathKfDrag(e, layer.id, kf.id, kf.time)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>)}
               </React.Fragment>
             );
           })
@@ -650,12 +751,7 @@ export default function Timeline() {
         />
       )}
 
-      {/* Playhead */}
-      <div
-        className="playhead"
-        style={{ left: playheadX }}
-        onMouseDown={startPlayheadDrag}
-      />
+      </div>
     </div>
   );
 }

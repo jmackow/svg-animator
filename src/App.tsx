@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting } from './utils/svgDom';
+import { parseSvgLayers } from './utils/svgParser';
+import { extractProjectMetadata } from './utils/exporter';
 import { ThemeProvider } from './context/ThemeContext';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
@@ -19,6 +22,37 @@ function isInputFocused(): boolean {
 function KeyboardShortcuts() {
   const { dispatch, deleteSelectedKeyframes, state } = useApp();
 
+  // Paste SVG from clipboard (e.g. Figma "Copy as SVG")
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (isInputFocused()) return;
+      const svgText =
+        e.clipboardData?.getData('image/svg+xml') ||
+        e.clipboardData?.getData('text/plain') ||
+        '';
+      if (!svgText.trim().includes('<svg')) return;
+      e.preventDefault();
+      try {
+        const saved = extractProjectMetadata(svgText);
+        if (saved) {
+          dispatch({ type: 'LOAD_PROJECT', svgSource: svgText, layers: saved.layers, duration: saved.duration, canvasWidth: saved.canvasWidth, canvasHeight: saved.canvasHeight, motionPaths: saved.motionPaths ?? [] });
+          return;
+        }
+        if (state.svgSource === null) {
+          const { layers, source } = parseSvgLayers(svgText);
+          dispatch({ type: 'LOAD_SVG', svgSource: source, layers });
+        } else {
+          const stripped = stripIds(svgText);
+          const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
+          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, newSource);
+          dispatch({ type: 'MERGE_LAYERS', newLayers, newSvgSource: mergedSvg });
+        }
+      } catch { /* ignore invalid SVG */ }
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [dispatch, state.svgSource]);
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey;
@@ -37,9 +71,16 @@ function KeyboardShortcuts() {
       if (isInputFocused()) return;
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (state.selectedKeyframes.length > 0) {
+        if (state.selectedKeyframes.length > 0 || state.selectedPathKfIds.length > 0) {
           e.preventDefault();
           deleteSelectedKeyframes();
+        } else if (state.selectedLayerId && state.svgSource) {
+          e.preventDefault();
+          const layer = state.layers.find(l => l.id === state.selectedLayerId);
+          if (layer) {
+            const newSvgSource = removeElementsFromSvg(state.svgSource, [layer.elementId]);
+            dispatch({ type: 'DELETE_LAYER', layerId: state.selectedLayerId, newSvgSource });
+          }
         }
         return;
       }
@@ -59,7 +100,7 @@ function KeyboardShortcuts() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dispatch, deleteSelectedKeyframes, state.selectedKeyframes, state.isPlaying, state.svgSource, state.currentTime, state.duration]);
+  }, [dispatch, deleteSelectedKeyframes, state.selectedKeyframes, state.selectedPathKfIds, state.isPlaying, state.svgSource, state.currentTime, state.duration, state.selectedLayerId, state.layers]);
 
   return null;
 }

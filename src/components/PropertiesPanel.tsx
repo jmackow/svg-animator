@@ -4,8 +4,10 @@ import { interpolateProperty, interpolateTracks, packColor, unpackColor } from '
 import {
   AnimatableProperty, EasingConfig, GradientDef, GradientStop,
   PROPERTY_LABELS, PROPERTY_DEFAULTS, ALL_PROPERTIES, DEFAULT_EASING,
+  PathPoint, PointType, PathKeyframe,
 } from '../types';
 import { EasingPicker } from './EasingPicker';
+import { interpolatePathPoints, parsePath, alignPointIds, buildPath } from '../utils/pathPoints';
 
 function makeStopId() { return `stop-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 
@@ -69,10 +71,14 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
   // The keyframe we're editing: prefer selected, fall back to playhead kf
   const editableKf = selectedKf ?? kfAtPlayhead;
 
+  // When track has no keyframes at all, edit the base value directly
+  const isBaseMode = layer.tracks[property].length === 0;
+
   const interpolated = interpolateProperty(
     layer.tracks[property], state.currentTime, PROPERTY_DEFAULTS[property]
   );
-  const displayValue = editableKf ? editableKf.value : interpolated;
+  const baseVal = isBaseMode ? (layer.baseValues?.[property] ?? PROPERTY_DEFAULTS[property]) : PROPERTY_DEFAULTS[property];
+  const displayValue = editableKf ? editableKf.value : (isBaseMode ? baseVal : interpolated);
 
   const [raw, setRaw] = useState(displayValue.toFixed(step < 1 ? 3 : 0));
   useEffect(() => {
@@ -88,8 +94,12 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
 
   function commitValue(numStr: string) {
     const n = parseFloat(numStr);
-    if (isNaN(n) || !editableKf) return;
-    dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId, property, keyframeId: editableKf.id, value: clamp(n) });
+    if (isNaN(n)) return;
+    if (editableKf) {
+      dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId, property, keyframeId: editableKf.id, value: clamp(n) });
+    } else if (isBaseMode) {
+      dispatch({ type: 'SET_LAYER_BASE_VALUE', layerId, property, value: clamp(n) });
+    }
   }
 
   function handleDelete() {
@@ -98,7 +108,7 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
   }
 
   const hasKfAtPlayhead = !!kfAtPlayhead;
-  const isEditable = !!editableKf;
+  const isEditable = !!editableKf || isBaseMode;
   const shortLabel = PROPERTY_LABELS[property].split(' ')[1] || PROPERTY_LABELS[property];
 
   return (
@@ -106,7 +116,7 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
       <div className="prop-row">
         <label className="prop-label">{shortLabel}</label>
         <input
-          className={`prop-input ${hasKfAtPlayhead ? 'prop-input--keyed' : isEditable ? 'prop-input--selected-kf' : ''}`}
+          className={`prop-input ${hasKfAtPlayhead ? 'prop-input--keyed' : editableKf ? 'prop-input--selected-kf' : ''}`}
           type="number"
           step={step} min={min} max={max}
           value={raw}
@@ -114,11 +124,15 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
           onChange={(e) => setRaw(e.target.value)}
           onBlur={(e) => commitValue(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && commitValue(raw)}
-          title={isEditable
-            ? editableKf === kfAtPlayhead
-              ? 'Editing keyframe at playhead'
-              : `Editing keyframe at ${editableKf.time.toFixed(2)}s`
-            : 'No keyframe — click ◆ to add one'}
+          title={
+            isBaseMode
+              ? 'Base value — click ◆ to add a keyframe'
+              : editableKf
+              ? editableKf === kfAtPlayhead
+                ? 'Editing keyframe at playhead'
+                : `Editing keyframe at ${editableKf.time.toFixed(2)}s`
+              : 'No keyframe — click ◆ to add one'
+          }
         />
         {suffix && <span className="prop-suffix">{suffix}</span>}
         <button
@@ -126,7 +140,7 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
           title={hasKfAtPlayhead ? 'Remove keyframe at playhead' : 'Add keyframe at playhead'}
           onClick={() => togglePropertyKeyframe(layerId, property)}
         >◆</button>
-        {isEditable && (
+        {editableKf && (
           <button className="kf-delete-btn" title="Delete keyframe (Backspace)" onClick={handleDelete}>✕</button>
         )}
       </div>
@@ -137,8 +151,12 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
           <input type="range" min={0} max={1} step={0.01} value={displayValue}
             disabled={!isEditable}
             onChange={(e) => {
-              if (!editableKf) return;
-              dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId, property, keyframeId: editableKf.id, value: parseFloat(e.target.value) });
+              const v = parseFloat(e.target.value);
+              if (editableKf) {
+                dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId, property, keyframeId: editableKf.id, value: v });
+              } else if (isBaseMode) {
+                dispatch({ type: 'SET_LAYER_BASE_VALUE', layerId, property, value: v });
+              }
             }}
             style={{ flex: 1, marginLeft: 68 }}
           />
@@ -381,6 +399,181 @@ function ColorRow({ layerId, property }: { layerId: string; property: 'fillColor
   );
 }
 
+// ─── Path Point Section ───────────────────────────────────────────────────────
+
+function makeKfId() { return `pkf-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+
+function PathPointSection({ layerId }: { layerId: string }) {
+  const { state, dispatch } = useApp();
+  const layer = state.layers.find(l => l.id === layerId)!;
+  const { selectedPointId, currentTime } = state;
+
+  const livePoints = interpolatePathPoints(layer.pathKeyframes ?? [], currentTime);
+  const kfAtPlayhead = (layer.pathKeyframes ?? []).find(kf => Math.abs(kf.time - currentTime) < 0.001);
+  const hasKfs = (layer.pathKeyframes?.length ?? 0) > 0;
+
+  // Read points from live SVG element (for when no kf exists yet)
+  function getLiveElPoints(): { points: PathPoint[]; closed: boolean } | null {
+    const svgEl = document.querySelector('.svg-host svg') as SVGSVGElement | null;
+    if (!svgEl) return null;
+    const el = svgEl.getElementById(layer.elementId);
+    const d = el?.getAttribute('d');
+    if (!d) return null;
+    return parsePath(d);
+  }
+
+  const displayPoints: PathPoint[] | null = livePoints && livePoints.length > 0
+    ? livePoints
+    : getLiveElPoints()?.points ?? null;
+
+  const selectedPt = displayPoints?.find(p => p.id === selectedPointId) ?? null;
+
+  if (!selectedPt) {
+    return (
+      <div className="prop-section">
+        <div className="prop-section-title">Shape</div>
+        <div style={{ padding: '4px 8px', fontSize: 11, color: 'var(--text-muted)' }}>
+          Click an anchor point on the canvas
+        </div>
+        {hasKfs && (
+          <div style={{ padding: '4px 8px', fontSize: 10, color: 'var(--kf-color)' }}>
+            {layer.pathKeyframes!.length} shape keyframe{layer.pathKeyframes!.length > 1 ? 's' : ''}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function updatePoint(patch: Partial<PathPoint>) {
+    if (!displayPoints) return;
+    const newPoints = displayPoints.map(p => p.id === selectedPt!.id ? { ...p, ...patch } : p);
+
+    if (kfAtPlayhead) {
+      dispatch({ type: 'UPDATE_PATH_KEYFRAME', layerId, keyframeId: kfAtPlayhead.id, points: newPoints });
+    } else {
+      // Create new keyframe at current time
+      const ref = layer.pathKeyframes?.[0];
+      const aligned = ref ? alignPointIds(newPoints, ref.points) : newPoints;
+      const elData = getLiveElPoints();
+      const newKf: PathKeyframe = {
+        id: makeKfId(),
+        time: currentTime,
+        points: aligned,
+        closed: elData?.closed ?? false,
+        easing: DEFAULT_EASING,
+        movedPointIds: selectedPointId ? [selectedPointId] : [],
+      };
+      dispatch({ type: 'ADD_PATH_KEYFRAME', layerId, keyframe: newKf });
+    }
+  }
+
+  function setPointType(type: PointType) {
+    if (!selectedPt) return;
+    if (type === 'corner') {
+      updatePoint({ type, cpInX: selectedPt.x, cpInY: selectedPt.y, cpOutX: selectedPt.x, cpOutY: selectedPt.y });
+    } else if (type === 'smooth') {
+      // Mirror out handle to in
+      const dx = selectedPt.cpOutX - selectedPt.x, dy = selectedPt.cpOutY - selectedPt.y;
+      updatePoint({ type, cpInX: selectedPt.x - dx, cpInY: selectedPt.y - dy });
+    } else {
+      updatePoint({ type });
+    }
+  }
+
+  const hasKfHere = !!kfAtPlayhead;
+
+  return (
+    <div className="prop-section">
+      <div className="prop-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>Anchor Point</span>
+        <button
+          className={`kf-toggle-btn ${hasKfHere ? 'kf-toggle-btn--active' : ''}`}
+          title={hasKfHere ? 'Remove shape keyframe' : 'Add shape keyframe'}
+          onClick={() => {
+            if (kfAtPlayhead) {
+              dispatch({ type: 'DELETE_PATH_KEYFRAME', layerId, keyframeId: kfAtPlayhead.id });
+            } else {
+              const pts = displayPoints!;
+              const ref = layer.pathKeyframes?.[0];
+              const aligned = ref ? alignPointIds(pts, ref.points) : pts;
+              const elData = getLiveElPoints();
+              dispatch({ type: 'ADD_PATH_KEYFRAME', layerId, keyframe: { id: makeKfId(), time: currentTime, points: aligned, closed: elData?.closed ?? false, easing: DEFAULT_EASING, movedPointIds: selectedPointId ? [selectedPointId] : [] } });
+            }
+          }}
+          style={{ marginRight: 8 }}
+        >◆</button>
+      </div>
+
+      {/* Point type toggle */}
+      <div className="prop-row" style={{ padding: '4px 8px', gap: 4 }}>
+        <label className="prop-label" style={{ fontSize: 10 }}>Type</label>
+        <div className="color-mode-toggle">
+          {(['corner', 'smooth', 'asymmetric'] as PointType[]).map(t => (
+            <button key={t} className={`color-mode-btn ${selectedPt.type === t ? 'color-mode-btn--active' : ''}`}
+              onClick={() => setPointType(t)} style={{ fontSize: 9, padding: '2px 4px' }}>
+              {t === 'corner' ? 'Corner' : t === 'smooth' ? 'Smooth' : 'Asym'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* X / Y */}
+      <div className="prop-row">
+        <label className="prop-label" style={{ fontSize: 10 }}>X</label>
+        <input className="prop-input" type="number" step={0.5}
+          value={selectedPt.x.toFixed(2)}
+          onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updatePoint({ x: v, cpInX: v + (selectedPt.cpInX - selectedPt.x), cpOutX: v + (selectedPt.cpOutX - selectedPt.x) }); }} />
+        <span className="prop-suffix">px</span>
+      </div>
+      <div className="prop-row">
+        <label className="prop-label" style={{ fontSize: 10 }}>Y</label>
+        <input className="prop-input" type="number" step={0.5}
+          value={selectedPt.y.toFixed(2)}
+          onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updatePoint({ y: v, cpInY: v + (selectedPt.cpInY - selectedPt.y), cpOutY: v + (selectedPt.cpOutY - selectedPt.y) }); }} />
+        <span className="prop-suffix">px</span>
+      </div>
+
+      {/* Handle controls if not corner */}
+      {selectedPt.type !== 'corner' && (
+        <>
+          <div style={{ padding: '3px 8px', fontSize: 10, color: 'var(--text-muted)' }}>In handle</div>
+          <div className="prop-row">
+            <label className="prop-label" style={{ fontSize: 10 }}>X</label>
+            <input className="prop-input" type="number" step={0.5}
+              value={selectedPt.cpInX.toFixed(2)}
+              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updatePoint({ cpInX: v }); }} />
+          </div>
+          <div className="prop-row">
+            <label className="prop-label" style={{ fontSize: 10 }}>Y</label>
+            <input className="prop-input" type="number" step={0.5}
+              value={selectedPt.cpInY.toFixed(2)}
+              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updatePoint({ cpInY: v }); }} />
+          </div>
+          <div style={{ padding: '3px 8px', fontSize: 10, color: 'var(--text-muted)' }}>Out handle</div>
+          <div className="prop-row">
+            <label className="prop-label" style={{ fontSize: 10 }}>X</label>
+            <input className="prop-input" type="number" step={0.5}
+              value={selectedPt.cpOutX.toFixed(2)}
+              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updatePoint({ cpOutX: v }); }} />
+          </div>
+          <div className="prop-row">
+            <label className="prop-label" style={{ fontSize: 10 }}>Y</label>
+            <input className="prop-input" type="number" step={0.5}
+              value={selectedPt.cpOutY.toFixed(2)}
+              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updatePoint({ cpOutY: v }); }} />
+          </div>
+        </>
+      )}
+
+      {hasKfs && (
+        <div style={{ padding: '4px 8px', fontSize: 10, color: 'var(--kf-color)' }}>
+          {layer.pathKeyframes!.length} shape keyframe{layer.pathKeyframes!.length > 1 ? 's' : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Selected KF Section ──────────────────────────────────────────────────────
 
 function SelectedKfSection() {
@@ -573,10 +766,8 @@ export default function PropertiesPanel() {
     );
   }
 
-  // Determine which properties to show — only those with keyframes
-  const propsWithKfs = new Set(
-    ALL_PROPERTIES.filter((p) => layer!.tracks[p].length > 0)
-  );
+  const isPathLike = PATH_LIKE_TAGS.has(layer.tagName.toLowerCase());
+  const pointSelected = !!state.selectedPointId;
 
   return (
     <div className="properties-panel">
@@ -585,6 +776,15 @@ export default function PropertiesPanel() {
           {layer.label}
         </span>
       </div>
+
+      {/* When an anchor point is selected show point properties, otherwise show normal props */}
+      {isPathLike && pointSelected ? (
+        <>
+          <PathPointSection layerId={layer.id} />
+          <SelectedKfSection />
+        </>
+      ) : (
+        <>
       <div className="prop-hint" style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontSize: 10 }}>
         ◆ add/remove keyframe at playhead · ✕ delete selected
       </div>
@@ -621,6 +821,8 @@ export default function PropertiesPanel() {
       )}
       <SelectedKfSection />
       <AnimationPresets layerId={layer.id} />
+        </>
+      )}
     </div>
   );
 }

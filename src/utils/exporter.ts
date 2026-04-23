@@ -1,6 +1,7 @@
 import { Layer, AnimatableProperty, GradientDef, PROPERTY_DEFAULTS, ALL_PROPERTIES, MotionPath } from '../types';
 import { easingToCss } from './easing';
 import { unpackColor } from './interpolate';
+import { buildPath } from './pathPoints';
 
 function cssId(str: string): string {
   return str.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -117,7 +118,33 @@ export function exportAnimatedSvg(
 
     const hasAny = ALL_PROPERTIES.some((p) => layer.tracks[p].length >= 2);
     const hasGradient = !!(layer.fillGradient || layer.strokeGradient);
-    if (!hasAny && !hasGradient) continue;
+    const hasPathKfs = (layer.pathKeyframes?.length ?? 0) >= 2;
+    if (!hasAny && !hasGradient && !hasPathKfs) continue;
+
+    // Shape morph animation via CSS `d` property
+    if (hasPathKfs) {
+      const sorted = [...layer.pathKeyframes!].sort((a, b) => a.time - b.time);
+      // Validate all keyframes have same point count
+      const valid = sorted.every(kf => kf.points.length === sorted[0].points.length);
+      if (valid) {
+        const animName = `svga_shape_${cssId(layer.elementId)}`;
+        const kfLines = sorted.map((kf, i) => {
+          const pct = ((kf.time / duration) * 100).toFixed(3);
+          const d = buildPath(kf.points, kf.closed);
+          const timingFn = i < sorted.length - 1 ? easingToCss(kf.easing) : null;
+          const timing = timingFn ? `  animation-timing-function: ${timingFn};` : '';
+          return `  ${pct}% { d: path('${d}'); ${timing} }`;
+        });
+        const lastKf = sorted[sorted.length - 1];
+        if ((lastKf.time / duration) < 0.9999) {
+          kfLines.push(`  100.000% { d: path('${buildPath(lastKf.points, lastKf.closed)}'); }`);
+        }
+        cssBlocks.push(`@keyframes ${animName} {\n${kfLines.join('\n')}\n}`);
+        const iterCount = loop === 'infinite' ? 'infinite' : '1';
+        const fillMode = loop === 'infinite' ? 'none' : 'forwards';
+        cssBlocks.push(`#${CSS.escape(layer.elementId)} { animation: ${animName} ${duration}s linear; animation-iteration-count: ${iterCount}; animation-fill-mode: ${fillMode}; }`);
+      }
+    }
 
     // Embed static gradient fills/strokes directly on the element
     if (layer.fillGradient) {

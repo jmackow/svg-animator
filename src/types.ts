@@ -67,6 +67,7 @@ export interface MotionPath {
   id: string;
   label: string;
   d: string; // SVG path data string (M/L commands only for now)
+  visible?: boolean;
 }
 
 export interface GradientStop {
@@ -80,6 +81,27 @@ export interface GradientDef {
   type: 'linear';
   angle: number; // degrees, 0=left→right, 90=top→bottom
   stops: GradientStop[];
+}
+
+// ─── Path point animation ─────────────────────────────────────────────────────
+
+export type PointType = 'corner' | 'smooth' | 'asymmetric';
+
+export interface PathPoint {
+  id: string;
+  x: number; y: number;
+  cpInX: number; cpInY: number;   // incoming bezier control point
+  cpOutX: number; cpOutY: number; // outgoing bezier control point
+  type: PointType;
+}
+
+export interface PathKeyframe {
+  id: string;
+  time: number;
+  points: PathPoint[];
+  closed: boolean;
+  easing: EasingConfig; // easing FROM this keyframe to the next
+  movedPointIds?: string[]; // which points were explicitly edited at this keyframe
 }
 
 export interface Layer {
@@ -100,6 +122,8 @@ export interface Layer {
   defaultStroke?: string;  // hex color read from element on import
   fillGradient?: GradientDef;
   strokeGradient?: GradientDef;
+  pathKeyframes?: PathKeyframe[]; // shape/morph keyframes
+  baseValues?: Partial<Record<AnimatableProperty, number>>; // static transform values used when track has no keyframes
 }
 
 export interface SelectedKeyframe {
@@ -127,4 +151,6 @@ export interface AppState {
   drawingMotionPathId: string | null;
   cmdHoverLayerId: string | null;
   loopPlayback: boolean;
+  selectedPointId: string | null;   // selected anchor point id within the selected layer
+  selectedPathKfIds: string[];       // selected path keyframe ids (in timeline)
 }
