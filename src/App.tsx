@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
-import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting } from './utils/svgDom';
+import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting, extractSvgDimensions } from './utils/svgDom';
 import { parseSvgLayers } from './utils/svgParser';
 import { extractProjectMetadata } from './utils/exporter';
+import { importAnimations, mergeImportedTracks } from './utils/animationImporter';
 import { ThemeProvider } from './context/ThemeContext';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
@@ -40,12 +41,20 @@ function KeyboardShortcuts() {
         }
         if (state.svgSource === null) {
           const { layers, source } = parseSvgLayers(svgText);
-          dispatch({ type: 'LOAD_SVG', svgSource: source, layers });
+          const { layerTracks, maxDuration, strippedSource } = importAnimations(source, layers);
+          const finalLayers = mergeImportedTracks(layers, layerTracks);
+          dispatch({ type: 'LOAD_SVG', svgSource: strippedSource, layers: finalLayers });
+          if (maxDuration > 0.5) dispatch({ type: 'SET_DURATION', duration: maxDuration });
+          const dims = extractSvgDimensions(source);
+          if (dims) dispatch({ type: 'SET_CANVAS_SIZE', width: dims.width, height: dims.height });
         } else {
           const stripped = stripIds(svgText);
           const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
-          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, newSource);
-          dispatch({ type: 'MERGE_LAYERS', newLayers, newSvgSource: mergedSvg });
+          const { layerTracks, maxDuration, strippedSource } = importAnimations(newSource, newLayers);
+          const finalNewLayers = mergeImportedTracks(newLayers, layerTracks);
+          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, strippedSource);
+          dispatch({ type: 'MERGE_LAYERS', newLayers: finalNewLayers, newSvgSource: mergedSvg });
+          if (maxDuration > state.duration) dispatch({ type: 'SET_DURATION', duration: maxDuration });
         }
       } catch { /* ignore invalid SVG */ }
     }

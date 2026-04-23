@@ -276,7 +276,15 @@ export default function Canvas() {
         (s as any).offsetAnchor = '';
       }
 
-      s.transform = `translate(${vals.x + adjX}px, ${vals.y + adjY}px) rotate(${vals.rotation}deg) scale(${vals.scaleX}, ${vals.scaleY})`;
+      const hasTransformKfs =
+        layer.tracks.x.length > 0 || layer.tracks.y.length > 0 ||
+        layer.tracks.rotation.length > 0 ||
+        layer.tracks.scaleX.length > 0 || layer.tracks.scaleY.length > 0;
+      if (hasTransformKfs || mp) {
+        s.transform = `translate(${vals.x + adjX}px, ${vals.y + adjY}px) rotate(${vals.rotation}deg) scale(${vals.scaleX}, ${vals.scaleY})`;
+      } else {
+        s.transform = '';
+      }
       s.opacity = String(vals.opacity);
     }
   }, [state.layers, state.currentTime, state.motionPaths]);

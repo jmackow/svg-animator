@@ -60,6 +60,27 @@ export function moveElementInSvg(
   return new XMLSerializer().serializeToString(doc.documentElement);
 }
 
+export function extractSvgDimensions(svgSource: string): { width: number; height: number } | null {
+  const doc = new DOMParser().parseFromString(svgSource, 'image/svg+xml');
+  const svgEl = doc.querySelector('svg');
+  if (!svgEl) return null;
+  const vb = svgEl.getAttribute('viewBox');
+  if (vb) {
+    const parts = vb.trim().split(/[\s,]+/).map(Number);
+    if (parts.length >= 4 && parts[2] > 0 && parts[3] > 0) {
+      return { width: Math.round(parts[2]), height: Math.round(parts[3]) };
+    }
+  }
+  const wAttr = svgEl.getAttribute('width') ?? '';
+  const hAttr = svgEl.getAttribute('height') ?? '';
+  if (!wAttr.includes('%') && !hAttr.includes('%')) {
+    const w = parseFloat(wAttr);
+    const h = parseFloat(hAttr);
+    if (w > 0 && h > 0) return { width: Math.round(w), height: Math.round(h) };
+  }
+  return null;
+}
+
 export function collectDescendantLayerIds(layerId: string, layers: Layer[]): string[] {
   const result = [layerId];
   layers.filter(l => l.parentId === layerId).forEach(c => result.push(...collectDescendantLayerIds(c.id, layers)));

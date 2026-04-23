@@ -1,17 +1,100 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { MagnetStraight } from '@phosphor-icons/react';
 import { useApp } from '../context/AppContext';
 import {
   AnimatableProperty, ALL_PROPERTIES, PROPERTY_LABELS, PropertyKeyframe,
-  DEFAULT_EASING, PROPERTY_DEFAULTS, SelectedKeyframe,
+  EasingConfig, DEFAULT_EASING, PROPERTY_DEFAULTS, SelectedKeyframe,
 } from '../types';
 import { interpolateProperty } from '../utils/interpolate';
-import { curvePoints } from '../utils/easing';
+import { curvePoints, easingLabel } from '../utils/easing';
+import { EasingPicker } from './EasingPicker';
 
 const TRACK_HEIGHT = 28;
 const LAYER_HEADER_HEIGHT = 32;
 const RULER_HEIGHT = 24;
 const LEFT_GUTTER = 180;
+
+// ─── Segment popover ──────────────────────────────────────────────────────────
+
+interface SegmentPopoverData {
+  layerId: string;
+  property: AnimatableProperty;
+  kf1Id: string;
+  kf2Id: string;
+  x: number;
+  y: number;
+}
+
+function SegmentPopover({ data, onClose }: { data: SegmentPopoverData; onClose: () => void }) {
+  const { state, dispatch } = useApp();
+  const ref = useRef<HTMLDivElement>(null);
+
+  const layer = state.layers.find(l => l.id === data.layerId);
+  const sorted = layer ? [...layer.tracks[data.property]].sort((a, b) => a.time - b.time) : [];
+  const kf1 = sorted.find(k => k.id === data.kf1Id);
+  const kf2 = sorted.find(k => k.id === data.kf2Id);
+
+  const [rawDuration, setRawDuration] = useState(() =>
+    kf1 && kf2 ? String(Math.round((kf2.time - kf1.time) * 1000)) : '0'
+  );
+
+  useEffect(() => {
+    if (kf1 && kf2) setRawDuration(String(Math.round((kf2.time - kf1.time) * 1000)));
+  }, [kf1?.time, kf2?.time]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    window.addEventListener('mousedown', handler, true);
+    return () => window.removeEventListener('mousedown', handler, true);
+  }, [onClose]);
+
+  if (!layer || !kf1 || !kf2) return null;
+
+  function commitDuration(ms: number) {
+    if (!kf1) return;
+    const newTime = Math.min(state.duration, kf1.time + Math.max(1, ms) / 1000);
+    dispatch({ type: 'MOVE_PROPERTY_KEYFRAME', layerId: data.layerId, property: data.property, keyframeId: data.kf2Id, time: newTime });
+  }
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="segment-popover"
+      style={{ position: 'fixed', left: data.x, top: data.y - 6, transform: 'translate(-50%, -100%)', zIndex: 9999 }}
+      onMouseDown={e => e.stopPropagation()}
+    >
+      <div className="segment-popover-duration">
+        <label className="segment-popover-label">Duration</label>
+        <input
+          className="prop-input"
+          type="number"
+          min={1}
+          step={10}
+          value={rawDuration}
+          style={{ width: 68 }}
+          onChange={e => setRawDuration(e.target.value)}
+          onBlur={e => { const ms = parseInt(e.target.value); if (ms > 0) commitDuration(ms); }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { const ms = parseInt(rawDuration); if (ms > 0) commitDuration(ms); }
+            e.stopPropagation();
+          }}
+        />
+        <span className="segment-popover-unit">ms</span>
+      </div>
+      <EasingPicker
+        easing={kf1.easing}
+        alwaysOpen
+        onChange={(easing: EasingConfig) => {
+          dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId: data.layerId, property: data.property, keyframeId: data.kf1Id, easing });
+        }}
+      />
+    </div>,
+    document.body
+  );
+}
 
 // ─── Marquee state ────────────────────────────────────────────────────────────
 
@@ -38,6 +121,8 @@ export default function Timeline() {
   const dragRef = useRef<KfDragState | null>(null);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [snapTarget, setSnapTarget] = useState<number | null>(null);
+  const [segmentPopover, setSegmentPopover] = useState<SegmentPopoverData | null>(null);
+  const [editingDurationKey, setEditingDurationKey] = useState<string | null>(null);
 
   const { zoom, duration, currentTime, isPlaying, loopPlayback, layers, snapEnabled, selectedKeyframes, selectedPathKfIds } = state;
 
@@ -496,59 +581,132 @@ export default function Timeline() {
 
         {/* Track area SVG for easing curves */}
         <div className="track-area" style={{ position: 'relative' }}>
-          {/* Connecting lines + easing curves in SVG */}
-          <svg
-            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}
-          >
-            {sorted.length > 1 &&
-              sorted.slice(0, -1).map((kf1, i) => {
-                const kf2 = sorted[i + 1];
-                const x1 = kf1.time * zoom;
-                const x2 = kf2.time * zoom;
-                const gapWidth = x2 - x1;
-                const midY = TRACK_HEIGHT / 2;
-
-                return (
-                  <g key={kf1.id + '-segment'}>
-                    {/* Connecting line */}
-                    <line
-                      x1={x1} y1={midY}
-                      x2={x2} y2={midY}
-                      stroke="rgba(245,197,66,0.3)"
-                      strokeWidth={2}
+          {/* Connecting lines between keyframes (div-based for reliable positioning) */}
+          {sorted.slice(0, -1).map((kf1, i) => {
+            const kf2 = sorted[i + 1];
+            const x1 = kf1.time * zoom;
+            const x2 = kf2.time * zoom;
+            const gapWidth = x2 - x1;
+            return (
+              <React.Fragment key={kf1.id + '-line'}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: TRACK_HEIGHT / 2 - 1,
+                    left: x1,
+                    width: gapWidth,
+                    height: 2,
+                    background: 'rgba(245,197,66,0.4)',
+                    borderRadius: 1,
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }}
+                />
+                {/* Easing curve SVG overlay */}
+                {gapWidth > 50 && (
+                  <svg
+                    style={{
+                      position: 'absolute',
+                      left: x1 + 4,
+                      top: (TRACK_HEIGHT - (TRACK_HEIGHT - 10)) / 2,
+                      width: gapWidth - 8,
+                      height: TRACK_HEIGHT - 10,
+                      overflow: 'visible',
+                      pointerEvents: 'none',
+                      zIndex: 1,
+                    }}
+                  >
+                    <polyline
+                      points={curvePoints(kf1.easing, gapWidth - 8, TRACK_HEIGHT - 10, 30)}
+                      fill="none"
+                      stroke="rgba(245,197,66,0.55)"
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     />
-                    {/* Easing curve preview if gap is wide enough */}
-                    {gapWidth > 50 && (
-                      <g
-                        transform={`translate(${x1 + 4}, ${(TRACK_HEIGHT - (TRACK_HEIGHT - 10)) / 2})`}
-                        style={{ pointerEvents: 'all' }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dispatch({ type: 'SELECT_KEYFRAMES', kfs: [{ layerId, property, keyframeId: kf1.id }] });
-                        }}
-                      >
-                        <rect
-                          x={0} y={0}
-                          width={gapWidth - 8}
-                          height={TRACK_HEIGHT - 10}
-                          fill="transparent"
-                          style={{ cursor: 'pointer' }}
-                        />
-                        <polyline
-                          points={curvePoints(kf1.easing, gapWidth - 8, TRACK_HEIGHT - 10, 30)}
-                          fill="none"
-                          stroke="rgba(245,197,66,0.5)"
-                          strokeWidth={1.5}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          style={{ pointerEvents: 'none' }}
-                        />
-                      </g>
-                    )}
-                  </g>
-                );
-              })}
-          </svg>
+                  </svg>
+                )}
+              </React.Fragment>
+            );
+          })}
+
+          {/* Segment pills — duration + easing label */}
+          {sorted.slice(0, -1).map((kf1, i) => {
+            const kf2 = sorted[i + 1];
+            const x1 = kf1.time * zoom;
+            const x2 = kf2.time * zoom;
+            const gapWidth = x2 - x1;
+            if (gapWidth < 80) return null;
+            const durMs = Math.round((kf2.time - kf1.time) * 1000);
+            const label = easingLabel(kf1.easing);
+            const isOpen = segmentPopover?.kf1Id === kf1.id && segmentPopover?.kf2Id === kf2.id;
+            const isEditingDur = editingDurationKey === kf1.id;
+
+            function commitDuration(ms: number) {
+              if (ms > 0) {
+                const newTime = Math.min(duration, kf1.time + ms / 1000);
+                dispatch({ type: 'MOVE_PROPERTY_KEYFRAME', layerId, property, keyframeId: kf2.id, time: newTime });
+              }
+              setEditingDurationKey(null);
+            }
+
+            return (
+              <div
+                key={kf1.id + '-pill'}
+                className={`kf-segment-pill${isOpen ? ' kf-segment-pill--open' : ''}`}
+                style={{ left: x1 + gapWidth / 2, top: '50%', transform: 'translate(-50%, -50%)' }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {/* Easing label — opens the easing popover */}
+                <span
+                  className="kf-segment-pill-easing"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const pill = (e.currentTarget as HTMLElement).closest('.kf-segment-pill') as HTMLElement;
+                    const rect = pill.getBoundingClientRect();
+                    setSegmentPopover(isOpen ? null : { layerId, property, kf1Id: kf1.id, kf2Id: kf2.id, x: rect.left + rect.width / 2, y: rect.top });
+                  }}
+                >
+                  {label}
+                </span>
+
+                {/* Duration — click to edit inline */}
+                {isEditingDur ? (
+                  <>
+                    <input
+                      className="kf-segment-duration-input"
+                      type="number"
+                      min={1}
+                      step={10}
+                      defaultValue={durMs}
+                      style={{ width: `${String(durMs).length + 0.5}ch` }}
+                      ref={(el) => { if (el) el.select(); }}
+                      onClick={(e) => e.stopPropagation()}
+                      onBlur={(e) => commitDuration(parseInt(e.target.value))}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') commitDuration(parseInt((e.target as HTMLInputElement).value));
+                        if (e.key === 'Escape') setEditingDurationKey(null);
+                      }}
+                    />
+                    <span className="kf-segment-pill-duration">ms</span>
+                  </>
+                ) : (
+                  <span
+                    className="kf-segment-pill-duration"
+                    title="Click to edit duration"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSegmentPopover(null);
+                      setEditingDurationKey(kf1.id);
+                    }}
+                  >
+                    {durMs}ms
+                  </span>
+                )}
+              </div>
+            );
+          })}
 
           {/* Keyframe diamonds */}
           {kfs.map((kf) => {
@@ -563,6 +721,7 @@ export default function Timeline() {
                 onMouseDown={(e) => startKfDrag(e, layerId, property, kf)}
                 onClick={(e) => {
                   e.stopPropagation();
+                  dispatch({ type: 'SET_TIME', time: kf.time });
                   if (!e.shiftKey) {
                     dispatch({ type: 'SELECT_KEYFRAMES', kfs: [{ layerId, property, keyframeId: kf.id }] });
                   }
@@ -617,6 +776,9 @@ export default function Timeline() {
 
   return (
     <div className="timeline-panel" onWheel={handleWheel}>
+      {segmentPopover && (
+        <SegmentPopover data={segmentPopover} onClose={() => setSegmentPopover(null)} />
+      )}
       {renderRuler()}
 
       <div className="timeline-body" ref={timelineRef} style={{ overflow: 'auto', flex: 1 }} onMouseDown={startMarqueeDrag}>

@@ -5,7 +5,8 @@ import { emptyTracks } from '../context/AppContext';
 import ThemePicker from './ThemePicker';
 import { parseSvgLayers } from '../utils/svgParser';
 import { exportAnimatedSvg, downloadSvg, extractProjectMetadata } from '../utils/exporter';
-import { stripIds, appendSvgChildrenToExisting, appendRawElementToSvg, createMinimalSvg } from '../utils/svgDom';
+import { stripIds, appendSvgChildrenToExisting, appendRawElementToSvg, createMinimalSvg, extractSvgDimensions } from '../utils/svgDom';
+import { importAnimations, mergeImportedTracks } from '../utils/animationImporter';
 import { Layer } from '../types';
 
 export default function Toolbar() {
@@ -53,12 +54,24 @@ export default function Toolbar() {
           setCanvasH(String(saved.canvasHeight));
         } else if (state.svgSource === null) {
           const { layers, source } = parseSvgLayers(text);
-          dispatch({ type: 'LOAD_SVG', svgSource: source, layers });
+          const { layerTracks, maxDuration, strippedSource } = importAnimations(source, layers);
+          const finalLayers = mergeImportedTracks(layers, layerTracks);
+          dispatch({ type: 'LOAD_SVG', svgSource: strippedSource, layers: finalLayers });
+          if (maxDuration > 0.5) dispatch({ type: 'SET_DURATION', duration: maxDuration });
+          const dims = extractSvgDimensions(source);
+          if (dims) {
+            dispatch({ type: 'SET_CANVAS_SIZE', width: dims.width, height: dims.height });
+            setCanvasW(String(dims.width));
+            setCanvasH(String(dims.height));
+          }
         } else {
           const stripped = stripIds(text);
           const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
-          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, newSource);
-          dispatch({ type: 'MERGE_LAYERS', newLayers, newSvgSource: mergedSvg });
+          const { layerTracks, maxDuration, strippedSource } = importAnimations(newSource, newLayers);
+          const finalNewLayers = mergeImportedTracks(newLayers, layerTracks);
+          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, strippedSource);
+          dispatch({ type: 'MERGE_LAYERS', newLayers: finalNewLayers, newSvgSource: mergedSvg });
+          if (maxDuration > state.duration) dispatch({ type: 'SET_DURATION', duration: maxDuration });
         }
       } catch {
         alert('Failed to parse SVG file.');

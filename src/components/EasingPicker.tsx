@@ -253,8 +253,8 @@ const DEFAULT_SPRING: SpringEasingConfig = { type: 'spring', stiffness: 120, dam
 // ─── Main EasingPicker ────────────────────────────────────────────────────────
 
 export function EasingPicker({
-  easing, onChange,
-}: { easing: EasingConfig; onChange: (c: EasingConfig) => void }) {
+  easing, onChange, alwaysOpen = false,
+}: { easing: EasingConfig; onChange: (c: EasingConfig) => void; alwaysOpen?: boolean }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -272,7 +272,7 @@ export function EasingPicker({
 
   function select(config: EasingConfig) {
     onChange(config);
-    setOpen(false);
+    if (!alwaysOpen) setOpen(false);
   }
 
   function isActive(cfg: EasingConfig): boolean {
@@ -281,20 +281,24 @@ export function EasingPicker({
     return true;
   }
 
+  const showDropdown = open || alwaysOpen;
+
   return (
     <div className="easing-picker" ref={rootRef}>
-      {/* Trigger */}
-      <button className="easing-trigger" onClick={() => setOpen((o) => !o)}>
-        <span className="easing-trigger-curve">
-          <CurvePreview config={easing} width={32} height={18} />
-        </span>
-        <span className="easing-trigger-label">{easingLabel(easing)}</span>
-        <span className="easing-trigger-arrow">{open ? '▴' : '▾'}</span>
-      </button>
+      {/* Trigger — hidden when alwaysOpen */}
+      {!alwaysOpen && (
+        <button className="easing-trigger" onClick={() => setOpen((o) => !o)}>
+          <span className="easing-trigger-curve">
+            <CurvePreview config={easing} width={32} height={18} />
+          </span>
+          <span className="easing-trigger-label">{easingLabel(easing)}</span>
+          <span className="easing-trigger-arrow">{open ? '▴' : '▾'}</span>
+        </button>
+      )}
 
       {/* Inline dropdown */}
-      {open && (
-        <div className="easing-dropdown">
+      {showDropdown && (
+        <div className={`easing-dropdown${alwaysOpen ? ' easing-dropdown--inline' : ''}`}>
           <div className="easing-group-label">Presets</div>
           {PRESETS.map((p) => {
             const cfg: EasingConfig = { type: 'preset', name: p.name };

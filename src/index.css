@@ -1264,6 +1264,7 @@ html, body, #root {
   flex: 1;
   min-width: 0;
   overflow: visible;
+  align-self: stretch;
 }
 .track-header--layer { font-weight: 600; }
 .track-header--property { padding-left: 20px; font-weight: normal; color: var(--text-muted); }
@@ -1392,6 +1393,90 @@ html, body, #root {
 
 [data-theme="og"] .timeline-selection-marquee { background: rgba(10, 36, 106, 0.2); border-color: #000080; }
 [data-theme="luna"] .timeline-selection-marquee { background: rgba(49, 106, 197, 0.2); border-color: var(--selection-bg); }
+
+/* ── Segment pills ──────────────────────────────────────────────────────── */
+
+.kf-segment-pill {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: rgba(22, 22, 22, 0.92);
+  border: 1px solid rgba(245, 197, 66, 0.28);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+  cursor: pointer;
+  z-index: 2;
+  pointer-events: all;
+  user-select: none;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.kf-segment-pill:hover,
+.kf-segment-pill--open {
+  background: rgba(35, 35, 48, 0.98);
+  border-color: rgba(245, 197, 66, 0.7);
+  color: rgba(255, 255, 255, 0.95);
+}
+.kf-segment-pill-easing { font-weight: 500; cursor: pointer; }
+.kf-segment-pill-duration { color: var(--kf-color); cursor: text; }
+.kf-segment-pill-duration:hover { text-decoration: underline dotted; }
+.kf-segment-duration-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--kf-color);
+  color: var(--kf-color);
+  font-size: 10px;
+  font-family: inherit;
+  outline: none;
+  padding: 0;
+  text-align: right;
+  min-width: 0;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.kf-segment-duration-input::-webkit-outer-spin-button,
+.kf-segment-duration-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+/* ── Segment popover ────────────────────────────────────────────────────── */
+
+.segment-popover {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  min-width: 190px;
+}
+.segment-popover-duration {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.segment-popover-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.segment-popover-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.segment-popover .easing-picker { width: 100%; }
+.segment-popover .easing-dropdown--inline {
+  border: none;
+  border-top: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  background: transparent;
+}
 
 /* ── Keyframe diamonds (boring theme) ───────────────────────────────────── */
 
