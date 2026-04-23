@@ -582,6 +582,7 @@ html, body, #root {
   cursor: pointer;
   border-bottom: 1px solid var(--border);
   transition: background 0.1s;
+  position: relative;
 }
 .layer-row:hover { background: var(--surface2); }
 .layer-row--selected { background: var(--selection-bg); color: var(--selection-text); }
@@ -641,8 +642,9 @@ html, body, #root {
 [data-theme="og"] .layer-label,
 [data-theme="luna"] .layer-label { font-size: 11px; }
 
-.layer-actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity 0.1s; }
+.layer-actions { display: flex; gap: 2px; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity 0.1s; background: var(--surface2); }
 .layer-row:hover .layer-actions { opacity: 1; }
+.layer-row--selected .layer-actions { background: var(--selection-bg); }
 
 /* ══════════════════════════════════════════════════════════════════════════
    CANVAS
