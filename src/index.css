@@ -464,7 +464,9 @@ html, body, #root {
 [data-theme="classic-mac"] .btn-primary {
   background: #000;
   color: #FFF;
-  box-shadow: 0 0 0 3px #000, 0 0 0 4px #FFF;
+  border: 2px solid #000;
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px #FFF, 0 0 0 4px #000;
 }
 [data-theme="classic-mac"] .btn-active { background: #000; color: #FFF; }
 
@@ -2028,7 +2030,7 @@ html, body, #root {
   z-index: 15;
 }
 
-/* ── Transform overlay ──────────────────────────────────────────────────── */
+/* ── Transform overlay ───────────���──────────────────────────────────────── */
 
 .transform-overlay {
   position: absolute;
