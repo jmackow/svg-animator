@@ -120,6 +120,8 @@ export interface Layer {
   autoRotate: boolean;     // default false
   defaultFill?: string;    // hex color read from element on import
   defaultStroke?: string;  // hex color read from element on import
+  fillNone?: boolean;
+  strokeNone?: boolean;
   fillGradient?: GradientDef;
   strokeGradient?: GradientDef;
   pathKeyframes?: PathKeyframe[]; // shape/morph keyframes

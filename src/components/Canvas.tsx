@@ -213,7 +213,10 @@ export default function Canvas() {
       // Fill / stroke color
       const fillGradId = `svga-fg-${layer.elementId}`;
       const strokeGradId = `svga-sg-${layer.elementId}`;
-      if (layer.fillGradient) {
+      if (layer.fillNone) {
+        removeGradFromDefs(svgEl as SVGSVGElement, fillGradId);
+        s.fill = 'none';
+      } else if (layer.fillGradient) {
         s.fill = applyGradientToDefs(svgEl as SVGSVGElement, fillGradId, layer.fillGradient);
       } else {
         removeGradFromDefs(svgEl as SVGSVGElement, fillGradId);
@@ -225,7 +228,10 @@ export default function Canvas() {
           s.fill = '';
         }
       }
-      if (layer.strokeGradient) {
+      if (layer.strokeNone) {
+        removeGradFromDefs(svgEl as SVGSVGElement, strokeGradId);
+        s.stroke = 'none';
+      } else if (layer.strokeGradient) {
         s.stroke = applyGradientToDefs(svgEl as SVGSVGElement, strokeGradId, layer.strokeGradient);
       } else {
         removeGradFromDefs(svgEl as SVGSVGElement, strokeGradId);

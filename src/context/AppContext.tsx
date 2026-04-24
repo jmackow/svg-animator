@@ -96,6 +96,7 @@ export type Action =
   | { type: 'SET_CMD_HOVER_LAYER'; layerId: string | null }
   | { type: 'SET_LAYERS_DEFAULT_COLORS'; updates: Array<{ layerId: string; defaultFill?: string; defaultStroke?: string }> }
   | { type: 'SET_LAYER_GRADIENT'; layerId: string; target: 'fill' | 'stroke'; gradient: GradientDef | null }
+  | { type: 'SET_LAYER_COLOR_NONE'; layerId: string; target: 'fill' | 'stroke'; none: boolean }
   | { type: 'SET_LOOP_PLAYBACK'; loop: boolean }
   | { type: 'SELECT_POINT'; pointId: string | null }
   | { type: 'ADD_PATH_KEYFRAME'; layerId: string; keyframe: PathKeyframe }
@@ -532,6 +533,17 @@ function coreReducer(state: AppState, action: Action): AppState {
           ...(action.target === 'fill'
             ? { fillGradient: action.gradient ?? undefined }
             : { strokeGradient: action.gradient ?? undefined }),
+        })),
+      };
+
+    case 'SET_LAYER_COLOR_NONE':
+      return {
+        ...state,
+        layers: updateLayer(state.layers, action.layerId, l => ({
+          ...l,
+          ...(action.target === 'fill'
+            ? { fillNone: action.none }
+            : { strokeNone: action.none }),
         })),
       };
 
