@@ -8,7 +8,8 @@
       "Bash(curl -s http://localhost:5173)",
       "Bash(grep -n \"SELECT_KEYFRAME\\\\b\" /Users/jaroslawmackow/Documents/Projects/Code/svg-animator/src/components/*.tsx /Users/jaroslawmackow/Documents/Projects/Code/svg-animator/src/context/*.tsx)",
       "Bash(node -e \"require\\(''''@phosphor-icons/react''''\\)\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(xargs ls *)"
     ]
   }
 }

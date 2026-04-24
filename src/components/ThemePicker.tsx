@@ -4,12 +4,12 @@ import { Palette } from '@phosphor-icons/react';
 
 const THEMES: { id: Theme; label: string; description: string }[] = [
   { id: 'boring', label: 'Boring', description: 'Modern dark theme' },
-  { id: 'og', label: 'OG', description: 'Windows 2000 classic' },
+  { id: 'og', label: '95', description: 'Windows 2000 classic' },
   { id: 'luna', label: 'Luna', description: 'Windows XP style' },
-  { id: 'classic-mac', label: 'Classic Mac', description: 'Macintosh System 7' },
+  { id: 'classic-mac', label: 'OG', description: 'Macintosh System 7' },
   { id: 'nothing', label: 'Nothing', description: 'Nothing OS style' },
   { id: 'aqua', label: 'Aqua', description: 'Mac OS X Aqua' },
-  { id: 'xbox', label: 'Xbox', description: 'Original Xbox Dashboard' },
+  { id: 'xbox', label: 'The X', description: 'Original Xbox Dashboard' },
 ];
 
 export default function ThemePicker() {

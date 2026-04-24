@@ -171,6 +171,9 @@ export default function App() {
           '--timeline-h': `${timelineH}px`,
         } as React.CSSProperties}
       >
+        <div className="small-screen-overlay">
+          <div className="small-screen-overlay-text">Animation is a big screen activity</div>
+        </div>
         <Toolbar />
         <div className="main-area">
           <LeftPanel />

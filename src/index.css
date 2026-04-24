@@ -330,6 +330,11 @@ html, body, #root {
   background: var(--toolbar-bg);
   border-bottom: 1px solid var(--toolbar-border);
   flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 [data-theme="og"] .toolbar {
@@ -378,6 +383,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 [data-theme="og"] .toolbar-group,
@@ -913,9 +919,9 @@ html, body, #root {
 }
 
 .theme-picker-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
+  position: fixed;
+  top: calc(var(--toolbar-h) + 4px);
+  right: 12px;
   min-width: 160px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1243,7 +1249,7 @@ html, body, #root {
 
 [data-theme="og"] .canvas-area { background: #3A6EA5; }
 [data-theme="luna"] .canvas-area {
-  background: linear-gradient(180deg, #245EDC 0%, #3B94E6 30%, #6FC3F7 60%, #A7D8A0 80%, #7CC576 100%);
+  background: url('/bliss.png') center center / cover no-repeat;
 }
 [data-theme="classic-mac"] .canvas-area { background: #666699; }
 [data-theme="nothing"] .canvas-area {
@@ -2565,9 +2571,9 @@ html, body, #root {
 }
 
 .import-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
+  top: calc(var(--toolbar-h) + 4px);
+  left: 12px;
   min-width: 90px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2665,3 +2671,43 @@ html, body, #root {
 [data-theme="classic-mac"] .layer-drop-indicator::before { background: #000; }
 [data-theme="nothing"] .layer-drop-indicator { background: var(--accent); }
 [data-theme="nothing"] .layer-drop-indicator::before { background: var(--accent); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SMALL SCREEN OVERLAY
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.small-screen-overlay {
+  display: none;
+}
+
+@media (max-width: 719px) {
+  .small-screen-overlay {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: var(--bg);
+    color: var(--text);
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 32px;
+    text-align: center;
+    font-family: var(--font-family);
+  }
+
+  .small-screen-overlay-text {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    max-width: 280px;
+    line-height: 1.4;
+  }
+
+  [data-theme="og"] .small-screen-overlay,
+  [data-theme="luna"] .small-screen-overlay,
+  [data-theme="classic-mac"] .small-screen-overlay {
+    border: 2px solid var(--border);
+  }
+}
