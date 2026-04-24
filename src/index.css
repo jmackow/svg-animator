@@ -1498,6 +1498,14 @@ html, body, #root {
   background: var(--kf-selected);
   box-shadow: 0 0 0 2px rgba(255,140,66,0.4);
 }
+.keyframe-diamond--ghost {
+  background: rgba(160,160,160,0.3);
+  border-color: rgba(160,160,160,0.2);
+  box-shadow: none;
+  cursor: default;
+  width: 8px;
+  height: 8px;
+}
 
 /* ── Playhead (boring theme) ────────────────────────────────────────────── */
 

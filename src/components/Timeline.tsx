@@ -579,54 +579,38 @@ export default function Timeline() {
           <span className="track-prop-name">{PROPERTY_LABELS[property]}</span>
         </div>
 
-        {/* Track area SVG for easing curves */}
+        {/* Track area */}
         <div className="track-area" style={{ position: 'relative' }}>
-          {/* Connecting lines between keyframes (div-based for reliable positioning) */}
+          {/* Easing curves between keyframes — no straight line, curve only */}
           {sorted.slice(0, -1).map((kf1, i) => {
             const kf2 = sorted[i + 1];
             const x1 = kf1.time * zoom;
             const x2 = kf2.time * zoom;
             const gapWidth = x2 - x1;
+            if (gapWidth <= 0) return null;
             return (
-              <React.Fragment key={kf1.id + '-line'}>
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: TRACK_HEIGHT / 2 - 1,
-                    left: x1,
-                    width: gapWidth,
-                    height: 2,
-                    background: 'rgba(245,197,66,0.4)',
-                    borderRadius: 1,
-                    pointerEvents: 'none',
-                    zIndex: 1,
-                  }}
+              <svg
+                key={kf1.id + '-curve'}
+                style={{
+                  position: 'absolute',
+                  left: x1 + 4,
+                  top: (TRACK_HEIGHT - (TRACK_HEIGHT - 10)) / 2,
+                  width: Math.max(1, gapWidth - 8),
+                  height: TRACK_HEIGHT - 10,
+                  overflow: 'visible',
+                  pointerEvents: 'none',
+                  zIndex: 1,
+                }}
+              >
+                <polyline
+                  points={curvePoints(kf1.easing, Math.max(1, gapWidth - 8), TRACK_HEIGHT - 10, 30)}
+                  fill="none"
+                  stroke="rgba(245,197,66,0.6)"
+                  strokeWidth={1.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                 />
-                {/* Easing curve SVG overlay */}
-                {gapWidth > 50 && (
-                  <svg
-                    style={{
-                      position: 'absolute',
-                      left: x1 + 4,
-                      top: (TRACK_HEIGHT - (TRACK_HEIGHT - 10)) / 2,
-                      width: gapWidth - 8,
-                      height: TRACK_HEIGHT - 10,
-                      overflow: 'visible',
-                      pointerEvents: 'none',
-                      zIndex: 1,
-                    }}
-                  >
-                    <polyline
-                      points={curvePoints(kf1.easing, gapWidth - 8, TRACK_HEIGHT - 10, 30)}
-                      fill="none"
-                      stroke="rgba(245,197,66,0.55)"
-                      strokeWidth={1.5}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </React.Fragment>
+              </svg>
             );
           })}
 
@@ -733,6 +717,21 @@ export default function Timeline() {
         </div>
       </div>
     );
+  }
+
+  // ── Collect all descendant KF times (for parent header ghost diamonds) ────
+  function collectDescendantKfTimesMs(layerId: string): Set<number> {
+    const times = new Set<number>();
+    const layer = layers.find(l => l.id === layerId);
+    if (!layer) return times;
+    for (const prop of ALL_PROPERTIES) {
+      for (const kf of layer.tracks[prop]) times.add(Math.round(kf.time * 1000));
+    }
+    for (const kf of layer.pathKeyframes ?? []) times.add(Math.round(kf.time * 1000));
+    for (const child of layers.filter(l => l.parentId === layerId)) {
+      for (const t of collectDescendantKfTimesMs(child.id)) times.add(t);
+    }
+    return times;
   }
 
   // ── Visible layers for timeline ───────────────────────────────────────────
@@ -856,7 +855,15 @@ export default function Timeline() {
                     <span className="track-name">{layer.label}</span>
                     {hasAnyKf && <span className="track-kf-dot" title="Has keyframes" />}
                   </div>
-                  <div className="track-area track-area--header" />
+                  <div className="track-area track-area--header" style={{ position: 'relative' }}>
+                    {Array.from(collectDescendantKfTimesMs(layer.id)).map(ms => (
+                      <div
+                        key={ms}
+                        className="keyframe-diamond keyframe-diamond--ghost"
+                        style={{ left: (ms / 1000) * zoom, pointerEvents: 'none' }}
+                      />
+                    ))}
+                  </div>
                 </div>
 
                 {/* Property tracks — only for properties that have keyframes */}
