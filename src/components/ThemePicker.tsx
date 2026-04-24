@@ -6,6 +6,8 @@ const THEMES: { id: Theme; label: string; description: string }[] = [
   { id: 'boring', label: 'Boring', description: 'Modern dark theme' },
   { id: 'og', label: 'OG', description: 'Windows 2000 classic' },
   { id: 'luna', label: 'Luna', description: 'Windows XP style' },
+  { id: 'classic-mac', label: 'Classic Mac', description: 'Macintosh System 7' },
+  { id: 'nothing', label: 'Nothing', description: 'Nothing OS style' },
 ];
 
 export default function ThemePicker() {
