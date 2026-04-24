@@ -8,6 +8,8 @@ const THEMES: { id: Theme; label: string; description: string }[] = [
   { id: 'luna', label: 'Luna', description: 'Windows XP style' },
   { id: 'classic-mac', label: 'Classic Mac', description: 'Macintosh System 7' },
   { id: 'nothing', label: 'Nothing', description: 'Nothing OS style' },
+  { id: 'aqua', label: 'Aqua', description: 'Mac OS X Aqua' },
+  { id: 'xbox', label: 'Xbox', description: 'Original Xbox Dashboard' },
 ];
 
 export default function ThemePicker() {

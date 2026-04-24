@@ -190,6 +190,106 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   THEME: AQUA (Mac OS X 10.0-10.4)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+[data-theme="aqua"] {
+  --bg: #8FADC6;
+  --surface: #D4DFE8;
+  --surface2: #C8D5E0;
+  --surface3: #E8EEF2;
+  --border: #6B8BA8;
+  --text: #000000;
+  --text-muted: #4A4A4A;
+  --accent: #2B6FC2;
+  --accent-dim: #1A4A8A;
+  --danger: #C23B2B;
+  --kf-color: #2B6FC2;
+  --kf-selected: #5599DD;
+  
+  /* Aqua specific */
+  --font-family: 'Lucida Grande', 'Helvetica Neue', system-ui, sans-serif;
+  --font-size: 12px;
+  --btn-radius: 5px;
+  --panel-radius: 6px;
+  --input-radius: 4px;
+  --selection-bg: #3875D7;
+  --selection-text: #FFFFFF;
+  --canvas-bg: #5A7A9A;
+  --panel-header-bg: linear-gradient(180deg, #B8C8D8 0%, #8AA8C4 100%);
+  --panel-header-text: #000000;
+  --toolbar-bg: linear-gradient(180deg, #E8F0F8 0%, #C8D8E8 100%);
+  --toolbar-border: #6B8BA8;
+  
+  /* Aqua pinstripes */
+  --aqua-pinstripe: repeating-linear-gradient(
+    90deg,
+    #FFFFFF 0px,
+    #FFFFFF 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  
+  /* Aqua glossy button gradient */
+  --aqua-btn: linear-gradient(180deg, 
+    #FFFFFF 0%, 
+    #E8F4FF 15%, 
+    #B8D4F0 50%, 
+    #88B4E0 51%, 
+    #A8CCF0 100%
+  );
+  --aqua-btn-hover: linear-gradient(180deg, 
+    #FFFFFF 0%, 
+    #F0F8FF 15%, 
+    #C8E0F8 50%, 
+    #98C4E8 51%, 
+    #B8D8F8 100%
+  );
+  --aqua-btn-active: linear-gradient(180deg, 
+    #88B4E0 0%, 
+    #A8CCF0 50%, 
+    #B8D4F0 100%
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME: XBOX (Original Xbox Dashboard)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+[data-theme="xbox"] {
+  --bg: #0A0A0A;
+  --surface: #0D1A0D;
+  --surface2: #142814;
+  --surface3: #1A3A1A;
+  --border: #2A5A2A;
+  --text: #8EDE47;
+  --text-muted: #5A9A3A;
+  --accent: #8EDE47;
+  --accent-dim: #1A3A1A;
+  --danger: #DE4747;
+  --kf-color: #8EDE47;
+  --kf-selected: #AEFF6A;
+  
+  /* Xbox specific */
+  --font-family: 'Segoe UI', 'Arial', system-ui, sans-serif;
+  --font-size: 12px;
+  --btn-radius: 2px;
+  --panel-radius: 4px;
+  --input-radius: 2px;
+  --selection-bg: #8EDE47;
+  --selection-text: #000000;
+  --canvas-bg: #050A05;
+  --panel-header-bg: linear-gradient(90deg, #1A3A1A 0%, #2A5A2A 50%, #1A3A1A 100%);
+  --panel-header-text: #8EDE47;
+  --toolbar-bg: linear-gradient(180deg, #0D1A0D 0%, #142814 100%);
+  --toolbar-border: #2A5A2A;
+  
+  /* Xbox glow effect */
+  --xbox-glow: 0 0 10px rgba(142, 222, 71, 0.3), 0 0 20px rgba(142, 222, 71, 0.1);
+  --xbox-glow-strong: 0 0 15px rgba(142, 222, 71, 0.5), 0 0 30px rgba(142, 222, 71, 0.2);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    BASE STYLES
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -258,6 +358,22 @@ html, body, #root {
   background: var(--surface);
 }
 
+[data-theme="aqua"] .toolbar {
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+}
+
+[data-theme="xbox"] .toolbar {
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--xbox-glow);
+}
+
 .toolbar-group {
   display: flex;
   align-items: center;
@@ -299,6 +415,24 @@ html, body, #root {
   border-right: none;
 }
 
+[data-theme="aqua"] .toolbar-group {
+  gap: 4px;
+  padding: 0 6px;
+  border-right: 1px solid rgba(107, 139, 168, 0.5);
+  padding-right: 10px;
+  margin-right: 4px;
+}
+[data-theme="aqua"] .toolbar-group:last-child { border-right: none; }
+
+[data-theme="xbox"] .toolbar-group {
+  gap: 6px;
+  padding: 0 6px;
+  border-right: 1px solid var(--border);
+  padding-right: 10px;
+  margin-right: 4px;
+}
+[data-theme="xbox"] .toolbar-group:last-child { border-right: none; }
+
 .toolbar-label {
   color: var(--text-muted);
   font-size: 12px;
@@ -320,6 +454,19 @@ html, body, #root {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+}
+
+[data-theme="aqua"] .toolbar-label {
+  color: var(--text);
+  font-size: 11px;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+}
+
+[data-theme="xbox"] .toolbar-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .toolbar-input {
@@ -369,6 +516,29 @@ html, body, #root {
 }
 [data-theme="nothing"] .toolbar-input:focus {
   border-color: var(--accent);
+}
+
+[data-theme="aqua"] .toolbar-input {
+  background: #FFFFFF;
+  border: 1px solid #6B8BA8;
+  border-radius: 4px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1), 0 1px 0 rgba(255,255,255,0.5);
+  font-size: 11px;
+}
+[data-theme="aqua"] .toolbar-input:focus {
+  border-color: var(--accent);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1), 0 0 0 2px rgba(43, 111, 194, 0.3);
+}
+
+[data-theme="xbox"] .toolbar-input {
+  background: #0A0A0A;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+}
+[data-theme="xbox"] .toolbar-input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--xbox-glow);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -497,6 +667,77 @@ html, body, #root {
 [data-theme="nothing"] .btn-active {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Aqua Buttons - glossy "lickable" style */
+[data-theme="aqua"] .btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  background: var(--aqua-btn);
+  border: 1px solid #5A7A9A;
+  border-radius: 5px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.8);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+  min-height: 22px;
+}
+[data-theme="aqua"] .btn:hover {
+  background: var(--aqua-btn-hover);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.8);
+}
+[data-theme="aqua"] .btn:active {
+  background: var(--aqua-btn-active);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+}
+[data-theme="aqua"] .btn:disabled { opacity: 0.5; }
+[data-theme="aqua"] .btn-primary {
+  background: linear-gradient(180deg, #6EB4F7 0%, #2B8DEF 50%, #0066CC 51%, #3399FF 100%);
+  border: 1px solid #0055AA;
+  color: #FFFFFF;
+  text-shadow: 0 -1px 0 rgba(0,0,0,0.3);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.4);
+}
+[data-theme="aqua"] .btn-primary:hover {
+  background: linear-gradient(180deg, #7EC4FF 0%, #3B9DFF 50%, #1076DD 51%, #44AAFF 100%);
+}
+[data-theme="aqua"] .btn-active {
+  background: var(--aqua-btn-active);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+}
+
+/* Xbox Buttons - dark with green glow */
+[data-theme="xbox"] .btn {
+  padding: 5px 12px;
+  font-size: 11px;
+  background: linear-gradient(180deg, #1A3A1A 0%, #0D1A0D 100%);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  min-height: 24px;
+}
+[data-theme="xbox"] .btn:hover {
+  background: linear-gradient(180deg, #2A5A2A 0%, #1A3A1A 100%);
+  box-shadow: var(--xbox-glow);
+}
+[data-theme="xbox"] .btn:active {
+  background: linear-gradient(180deg, #0D1A0D 0%, #1A3A1A 100%);
+}
+[data-theme="xbox"] .btn:disabled { opacity: 0.3; }
+[data-theme="xbox"] .btn-primary {
+  background: linear-gradient(180deg, #5AAA2A 0%, #3A8A1A 50%, #2A6A0A 100%);
+  border: 1px solid #8EDE47;
+  color: #000;
+  box-shadow: var(--xbox-glow);
+}
+[data-theme="xbox"] .btn-primary:hover {
+  background: linear-gradient(180deg, #6ABA3A 0%, #4A9A2A 50%, #3A7A1A 100%);
+  box-shadow: var(--xbox-glow-strong);
+}
+[data-theme="xbox"] .btn-active {
+  background: linear-gradient(180deg, #2A5A2A 0%, #1A3A1A 100%);
+  border-color: var(--accent);
+  box-shadow: var(--xbox-glow);
 }
 
 /* Loop Toggle */
@@ -2040,7 +2281,7 @@ html, body, #root {
   overflow: visible;
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* ═════════════════════════════════════���════════════════════════════════════
    TABS (LeftPanel)
    ══════════════════════════════════════════════════════════════════════════ */
 

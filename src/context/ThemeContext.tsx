@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-export type Theme = 'boring' | 'og' | 'luna' | 'classic-mac' | 'nothing';
+export type Theme = 'boring' | 'og' | 'luna' | 'classic-mac' | 'nothing' | 'aqua' | 'xbox';
 
 interface ThemeContextValue {
   theme: Theme;
