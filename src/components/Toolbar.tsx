@@ -297,6 +297,19 @@ export default function Toolbar() {
           onKeyDown={(e) => e.key === 'Enter' && applyCanvasSize()}
           style={{ width: 52 }}
         />
+        <label
+          className="canvas-bg-swatch"
+          title="Canvas background color (click to change, right-click to reset)"
+          style={{ background: state.canvasBackground ?? '#000000' }}
+          onContextMenu={(e) => { e.preventDefault(); dispatch({ type: 'SET_CANVAS_BACKGROUND', color: null }); }}
+        >
+          <input
+            type="color"
+            value={state.canvasBackground ?? '#000000'}
+            onChange={(e) => dispatch({ type: 'SET_CANVAS_BACKGROUND', color: e.target.value })}
+            className="canvas-bg-input"
+          />
+        </label>
       </div>
 
       <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
@@ -309,7 +322,7 @@ export default function Toolbar() {
           className="toolbar-input"
           type="number"
           min={10}
-          max={400}
+          max={1000}
           step={10}
           value={Math.round(state.canvasZoom * 100)}
           onChange={(e) => {

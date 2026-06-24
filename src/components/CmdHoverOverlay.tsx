@@ -59,9 +59,7 @@ export default function CmdHoverOverlay({ svgContainerRef, canvasWidth, canvasHe
 
   return (
     <svg
-      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}
-      width={canvasWidth}
-      height={canvasHeight}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible', width: '100%', height: '100%' }}
       viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
     >
       <rect

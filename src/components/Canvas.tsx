@@ -36,11 +36,49 @@ function applyGradientToDefs(svgEl: SVGSVGElement, gradId: string, grad: Gradien
 function removeGradFromDefs(svgEl: SVGSVGElement, gradId: string) {
   svgEl.querySelector(`defs #${gradId}`)?.remove();
 }
+
+function upsertSkeletonHatch(svgEl: SVGSVGElement, elementId: string, fillHex: string, patternSize: number) {
+  const HATCH_ID = `svga-skeleton-hatch-${elementId}`;
+  const ns = 'http://www.w3.org/2000/svg';
+  let defs = svgEl.querySelector('defs');
+  if (!defs) { defs = document.createElementNS(ns, 'defs'); svgEl.insertBefore(defs, svgEl.firstChild); }
+  let pat = defs.querySelector(`#${HATCH_ID}`) as SVGPatternElement | null;
+  // Recreate pattern when size changes (can't resize just by changing attributes on existing lines)
+  const currentSize = pat ? parseFloat(pat.getAttribute('width') ?? '0') : -1;
+  if (!pat || currentSize !== patternSize) {
+    pat?.remove();
+    pat = document.createElementNS(ns, 'pattern') as SVGPatternElement;
+    pat.setAttribute('id', HATCH_ID);
+    pat.setAttribute('patternUnits', 'userSpaceOnUse');
+    pat.setAttribute('width', String(patternSize));
+    pat.setAttribute('height', String(patternSize));
+    const ps = patternSize;
+    const half = ps / 2;
+    for (const [x1, y1, x2, y2] of [[0, ps, ps, 0], [-half, half, half, -half], [half, ps + half, ps + half, half]] as [number,number,number,number][]) {
+      const l = document.createElementNS(ns, 'line');
+      l.setAttribute('x1', String(x1)); l.setAttribute('y1', String(y1));
+      l.setAttribute('x2', String(x2)); l.setAttribute('y2', String(y2));
+      l.setAttribute('stroke-width', '1.5');
+      l.setAttribute('stroke-linecap', 'square');
+      pat.appendChild(l);
+    }
+    defs.appendChild(pat);
+  }
+  // Update line color (pure hex — element fill-opacity controls transparency)
+  for (const l of Array.from(pat.querySelectorAll('line'))) {
+    l.setAttribute('stroke', fillHex);
+  }
+}
+
+function removeSkeletonHatch(svgEl: SVGSVGElement, elementId: string) {
+  svgEl.querySelector(`defs #svga-skeleton-hatch-${elementId}`)?.remove();
+}
 import TransformOverlay from './TransformOverlay';
 import MotionPathOverlay from './MotionPathOverlay';
 import CmdHoverOverlay from './CmdHoverOverlay';
 import PathPointOverlay from './PathPointOverlay';
 import SnapGuideOverlay from './SnapGuideOverlay';
+import SkeletonOverlay from './SkeletonOverlay';
 import { SnapProvider } from '../context/SnapContext';
 
 // Parse the first M coordinate from an SVG path data string
@@ -213,47 +251,64 @@ export default function Canvas() {
       // Fill / stroke color
       const fillGradId = `svga-fg-${layer.elementId}`;
       const strokeGradId = `svga-sg-${layer.elementId}`;
-      if (layer.fillNone) {
+      if (layer.skeletonMode) {
+        const sk = layer.skeletonColors ?? {};
+        const skFill        = sk.fill        ?? '#ffffff';
+        const skStroke      = sk.stroke      ?? '#ffffff';
+        const skPatternSize = sk.patternSize ?? 8;
+        upsertSkeletonHatch(svgEl as SVGSVGElement, layer.elementId, skFill, skPatternSize);
         removeGradFromDefs(svgEl as SVGSVGElement, fillGradId);
-        s.fill = 'none';
-      } else if (layer.fillGradient) {
-        s.fill = applyGradientToDefs(svgEl as SVGSVGElement, fillGradId, layer.fillGradient);
-      } else {
-        removeGradFromDefs(svgEl as SVGSVGElement, fillGradId);
-        if (layer.tracks.fillColor.length > 0) {
-          s.fill = unpackColor(vals.fillColor);
-        } else if (layer.defaultFill) {
-          s.fill = layer.defaultFill;
-        } else {
-          s.fill = '';
-        }
-      }
-      if (layer.strokeNone) {
         removeGradFromDefs(svgEl as SVGSVGElement, strokeGradId);
-        s.stroke = 'none';
-      } else if (layer.strokeGradient) {
-        s.stroke = applyGradientToDefs(svgEl as SVGSVGElement, strokeGradId, layer.strokeGradient);
+        s.fill        = `url(#svga-skeleton-hatch-${layer.elementId})`;
+        s.fillOpacity = String(sk.fillOpacity   ?? 0.32);
+        s.stroke      = skStroke;
+        s.strokeOpacity = String(sk.strokeOpacity ?? 0.9);
+        s.strokeWidth = String(sk.strokeWidth ?? 1);
       } else {
-        removeGradFromDefs(svgEl as SVGSVGElement, strokeGradId);
-        if (layer.tracks.strokeColor.length > 0) {
-          s.stroke = unpackColor(vals.strokeColor);
-        } else if (layer.defaultStroke) {
-          s.stroke = layer.defaultStroke;
+        removeSkeletonHatch(svgEl as SVGSVGElement, layer.elementId);
+        s.strokeWidth = '';
+        if (layer.fillNone) {
+          removeGradFromDefs(svgEl as SVGSVGElement, fillGradId);
+          s.fill = 'none';
+        } else if (layer.fillGradient) {
+          s.fill = applyGradientToDefs(svgEl as SVGSVGElement, fillGradId, layer.fillGradient);
         } else {
-          s.stroke = '';
+          removeGradFromDefs(svgEl as SVGSVGElement, fillGradId);
+          if (layer.tracks.fillColor.length > 0) {
+            s.fill = unpackColor(vals.fillColor);
+          } else if (layer.defaultFill) {
+            s.fill = layer.defaultFill;
+          } else {
+            s.fill = '';
+          }
         }
-      }
+        if (layer.strokeNone) {
+          removeGradFromDefs(svgEl as SVGSVGElement, strokeGradId);
+          s.stroke = 'none';
+        } else if (layer.strokeGradient) {
+          s.stroke = applyGradientToDefs(svgEl as SVGSVGElement, strokeGradId, layer.strokeGradient);
+        } else {
+          removeGradFromDefs(svgEl as SVGSVGElement, strokeGradId);
+          if (layer.tracks.strokeColor.length > 0) {
+            s.stroke = unpackColor(vals.strokeColor);
+          } else if (layer.defaultStroke) {
+            s.stroke = layer.defaultStroke;
+          } else {
+            s.stroke = '';
+          }
+        }
 
-      // Fill / stroke opacity
-      if (layer.tracks.fillOpacity.length > 0) {
-        s.fillOpacity = String(vals.fillOpacity);
-      } else {
-        s.fillOpacity = '';
-      }
-      if (layer.tracks.strokeOpacity.length > 0) {
-        s.strokeOpacity = String(vals.strokeOpacity);
-      } else {
-        s.strokeOpacity = '';
+        // Fill / stroke opacity
+        if (layer.tracks.fillOpacity.length > 0) {
+          s.fillOpacity = String(vals.fillOpacity);
+        } else {
+          s.fillOpacity = '';
+        }
+        if (layer.tracks.strokeOpacity.length > 0) {
+          s.strokeOpacity = String(vals.strokeOpacity);
+        } else {
+          s.strokeOpacity = '';
+        }
       }
 
       // Motion path – compute origin adjustment so element starts at its natural position
@@ -282,15 +337,7 @@ export default function Canvas() {
         (s as any).offsetAnchor = '';
       }
 
-      const hasTransformKfs =
-        layer.tracks.x.length > 0 || layer.tracks.y.length > 0 ||
-        layer.tracks.rotation.length > 0 ||
-        layer.tracks.scaleX.length > 0 || layer.tracks.scaleY.length > 0;
-      if (hasTransformKfs || mp) {
-        s.transform = `translate(${vals.x + adjX}px, ${vals.y + adjY}px) rotate(${vals.rotation}deg) scale(${vals.scaleX}, ${vals.scaleY})`;
-      } else {
-        s.transform = '';
-      }
+      s.transform = `translate(${vals.x + adjX}px, ${vals.y + adjY}px) rotate(${vals.rotation}deg) scale(${vals.scaleX}, ${vals.scaleY})`;
       s.opacity = String(vals.opacity);
     }
   }, [state.layers, state.currentTime, state.motionPaths]);
@@ -551,35 +598,47 @@ export default function Canvas() {
                 position: 'absolute',
                 top: 0,
                 left: 0,
+                ...(state.canvasBackground ? { background: state.canvasBackground } : {}),
               }}
             >
-              <SnapProvider>
-                <div ref={svgContainerRef} className="svg-host" />
-                <TransformOverlay
-                  svgContainerRef={svgContainerRef}
-                  canvasWidth={state.canvasWidth}
-                  canvasHeight={state.canvasHeight}
-                />
-                <CmdHoverOverlay
-                  svgContainerRef={svgContainerRef}
-                  canvasWidth={state.canvasWidth}
-                  canvasHeight={state.canvasHeight}
-                />
-                <MotionPathOverlay
-                  svgContainerRef={svgContainerRef}
-                  canvasFrameRef={canvasFrameRef}
-                  canvasWidth={state.canvasWidth}
-                  canvasHeight={state.canvasHeight}
-                  canvasZoom={state.canvasZoom}
-                />
-                <PathPointOverlay
-                  svgContainerRef={svgContainerRef}
-                  canvasFrameRef={canvasFrameRef}
-                  canvasZoom={state.canvasZoom}
-                />
-                <SnapGuideOverlay canvasWidth={state.canvasWidth} canvasHeight={state.canvasHeight} />
-              </SnapProvider>
+              <div ref={svgContainerRef} className="svg-host" />
+              {/* PathPointOverlay / MotionPathOverlay / SkeletonOverlay stay inside the CSS-scaled
+                  frame — their coordinate systems divide by canvasZoom internally. */}
+              <MotionPathOverlay
+                svgContainerRef={svgContainerRef}
+                canvasFrameRef={canvasFrameRef}
+                canvasWidth={state.canvasWidth}
+                canvasHeight={state.canvasHeight}
+                canvasZoom={state.canvasZoom}
+              />
+              <PathPointOverlay
+                svgContainerRef={svgContainerRef}
+                canvasFrameRef={canvasFrameRef}
+                canvasZoom={state.canvasZoom}
+              />
+              <SkeletonOverlay
+                svgContainerRef={svgContainerRef}
+                canvasFrameRef={canvasFrameRef}
+                canvasZoom={state.canvasZoom}
+              />
             </div>
+            {/* TransformOverlay / CmdHoverOverlay / SnapGuideOverlay live OUTSIDE the CSS-scaled
+                frame so their SVG coordinates are never multiplied by canvasZoom. They cover the
+                full zoomed area via width/height 100% on their SVG elements. */}
+            <SnapProvider>
+              <TransformOverlay
+                svgContainerRef={svgContainerRef}
+                canvasWidth={state.canvasWidth}
+                canvasHeight={state.canvasHeight}
+                canvasZoom={state.canvasZoom}
+              />
+              <CmdHoverOverlay
+                svgContainerRef={svgContainerRef}
+                canvasWidth={state.canvasWidth}
+                canvasHeight={state.canvasHeight}
+              />
+              <SnapGuideOverlay canvasWidth={state.canvasWidth} canvasHeight={state.canvasHeight} />
+            </SnapProvider>
           </div>
         </div>
       )}

@@ -304,11 +304,12 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
   const mapping = getMapping(svgContainerRef, canvasFrameRef, canvasZoom, layer.elementId);
   if (!mapping) return null;
 
-  // Constant screen-pixel sizes regardless of zoom
-  const ANCHOR_R = 5;
-  const HANDLE_R = 3.5;
-  const STROKE = 1.5;
-  const DASH = '4 3';
+  const ANCHOR_R = 5 / canvasZoom;
+  const ANCHOR_HIT_R = 14 / canvasZoom;   // large transparent hit area
+  const HANDLE_R = 3.5 / canvasZoom;
+  const HANDLE_HIT_R = 10 / canvasZoom;
+  const STROKE = 1.5 / canvasZoom;
+  const DASH = `${4 / canvasZoom} ${3 / canvasZoom}`;
 
   const selectedPt = displayPoints.find(p => p.id === selectedPointId);
 
@@ -344,30 +345,45 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
                 stroke={PURPLE} strokeWidth={STROKE} strokeDasharray={DASH} opacity={0.6} />
             )}
             {isSelected && hasInHandle && (
-              <circle cx={ci.x} cy={ci.y} r={HANDLE_R}
-                fill="#fff" stroke={PURPLE} strokeWidth={STROKE}
-                style={{ pointerEvents: 'all', cursor: 'crosshair' }}
-                onMouseDown={(e) => startHandleDrag(e, pt.id, 'in')}
-              />
+              <>
+                {/* Visual */}
+                <circle cx={ci.x} cy={ci.y} r={HANDLE_R} fill="#fff" stroke={PURPLE} strokeWidth={STROKE} style={{ pointerEvents: 'none' }} />
+                {/* Hit area */}
+                <circle cx={ci.x} cy={ci.y} r={HANDLE_HIT_R} fill="transparent"
+                  style={{ pointerEvents: 'all', cursor: 'crosshair' }}
+                  onMouseDown={(e) => startHandleDrag(e, pt.id, 'in')}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                />
+              </>
             )}
             {isSelected && hasOutHandle && (
-              <circle cx={co.x} cy={co.y} r={HANDLE_R}
-                fill="#fff" stroke={PURPLE} strokeWidth={STROKE}
-                style={{ pointerEvents: 'all', cursor: 'crosshair' }}
-                onMouseDown={(e) => startHandleDrag(e, pt.id, 'out')}
-              />
+              <>
+                {/* Visual */}
+                <circle cx={co.x} cy={co.y} r={HANDLE_R} fill="#fff" stroke={PURPLE} strokeWidth={STROKE} style={{ pointerEvents: 'none' }} />
+                {/* Hit area */}
+                <circle cx={co.x} cy={co.y} r={HANDLE_HIT_R} fill="transparent"
+                  style={{ pointerEvents: 'all', cursor: 'crosshair' }}
+                  onMouseDown={(e) => startHandleDrag(e, pt.id, 'out')}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                />
+              </>
             )}
             {hasSelectedKf && (
-              <circle cx={a.x} cy={a.y} r={ANCHOR_R + 3}
-                fill="none" stroke="#fff" strokeWidth={1.5} opacity={0.8} style={{ pointerEvents: 'none' }} />
+              <circle cx={a.x} cy={a.y} r={ANCHOR_R + 3 / canvasZoom}
+                fill="none" stroke="#fff" strokeWidth={STROKE} opacity={0.8} style={{ pointerEvents: 'none' }} />
             )}
-            <circle
-              cx={a.x} cy={a.y} r={ANCHOR_R}
+            {/* Visual anchor */}
+            <circle cx={a.x} cy={a.y} r={ANCHOR_R}
               fill={isSelected ? PURPLE : PURPLE_DIM}
               stroke={isSelected ? '#fff' : PURPLE}
-              strokeWidth={isSelected ? 1.5 : 1}
+              strokeWidth={isSelected ? STROKE : STROKE * 0.67}
+              style={{ pointerEvents: 'none' }}
+            />
+            {/* Large transparent hit area — keeps clicks from deselecting the layer */}
+            <circle cx={a.x} cy={a.y} r={ANCHOR_HIT_R} fill="transparent"
               style={{ pointerEvents: 'all', cursor: 'move' }}
               onMouseDown={(e) => startPointDrag(e, pt.id)}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); getOrCreateKf(); }}
             />
           </g>
         );
@@ -376,7 +392,7 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
       {hasKfs && !kfAtPlayhead && selectedPt && (() => {
         const sp = userToFrame(selectedPt.x, selectedPt.y, mapping);
         return (
-          <text x={sp.x + 10} y={sp.y - 8} fontSize={10} fill="#f5c542" style={{ pointerEvents: 'none' }}>
+          <text x={sp.x + 10 / canvasZoom} y={sp.y - 8 / canvasZoom} fontSize={10 / canvasZoom} fill="#f5c542" style={{ pointerEvents: 'none' }}>
             ◆ click ◆ to add shape keyframe
           </text>
         );

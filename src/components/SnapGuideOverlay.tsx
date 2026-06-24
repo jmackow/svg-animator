@@ -6,9 +6,7 @@ export default function SnapGuideOverlay({ canvasWidth, canvasHeight }: { canvas
   if (!guides.length) return null;
   return (
     <svg
-      style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
-      width={canvasWidth}
-      height={canvasHeight}
+      style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', width: '100%', height: '100%' }}
       viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
     >
       {guides.map((g, i) => g.axis === 'x'

@@ -51,6 +51,7 @@ const initialState: AppState = {
   loopPlayback: false,
   selectedPointId: null,
   selectedPathKfIds: [],
+  canvasBackground: null,
 };
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -97,6 +98,9 @@ export type Action =
   | { type: 'SET_LAYERS_DEFAULT_COLORS'; updates: Array<{ layerId: string; defaultFill?: string; defaultStroke?: string }> }
   | { type: 'SET_LAYER_GRADIENT'; layerId: string; target: 'fill' | 'stroke'; gradient: GradientDef | null }
   | { type: 'SET_LAYER_COLOR_NONE'; layerId: string; target: 'fill' | 'stroke'; none: boolean }
+  | { type: 'TOGGLE_LAYER_SKELETON'; layerId: string }
+  | { type: 'SET_LAYER_SKELETON_COLORS'; layerId: string; colors: { stroke?: string; strokeOpacity?: number; fill?: string; fillOpacity?: number; anchor?: string; strokeWidth?: number; handleScale?: number; patternSize?: number } }
+  | { type: 'SET_CANVAS_BACKGROUND'; color: string | null }
   | { type: 'SET_LOOP_PLAYBACK'; loop: boolean }
   | { type: 'SELECT_POINT'; pointId: string | null }
   | { type: 'ADD_PATH_KEYFRAME'; layerId: string; keyframe: PathKeyframe }
@@ -366,7 +370,7 @@ function coreReducer(state: AppState, action: Action): AppState {
       };
 
     case 'SET_CANVAS_ZOOM':
-      return { ...state, canvasZoom: Math.max(0.1, Math.min(4, action.zoom)) };
+      return { ...state, canvasZoom: Math.max(0.1, Math.min(10, action.zoom)) };
 
     case 'ADD_MOTION_PATH':
       return { ...state, motionPaths: [...state.motionPaths, action.path] };
@@ -546,6 +550,27 @@ function coreReducer(state: AppState, action: Action): AppState {
             : { strokeNone: action.none }),
         })),
       };
+
+    case 'TOGGLE_LAYER_SKELETON':
+      return {
+        ...state,
+        layers: updateLayer(state.layers, action.layerId, l => ({
+          ...l,
+          skeletonMode: !l.skeletonMode,
+        })),
+      };
+
+    case 'SET_LAYER_SKELETON_COLORS':
+      return {
+        ...state,
+        layers: updateLayer(state.layers, action.layerId, l => ({
+          ...l,
+          skeletonColors: { ...l.skeletonColors, ...action.colors },
+        })),
+      };
+
+    case 'SET_CANVAS_BACKGROUND':
+      return { ...state, canvasBackground: action.color };
 
     case 'SET_LAYER_BASE_VALUE':
     case 'SET_LAYER_BASE_VALUE_SILENT':

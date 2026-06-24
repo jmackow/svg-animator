@@ -842,6 +842,8 @@ html, body, #root {
   line-height: 1;
 }
 .icon-btn:hover { color: var(--text); background: var(--surface3); }
+.layer-skeleton-btn--active { color: var(--accent) !important; }
+.layer-skeleton-btn--active:hover { color: var(--accent) !important; }
 .add-kf-btn { color: var(--kf-color); }
 .add-kf-btn:hover { color: var(--kf-selected); }
 
@@ -2859,6 +2861,58 @@ html, body, #root {
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* Skeleton color picker rows */
+.skeleton-color-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--input-radius);
+  cursor: pointer;
+  transition: border-color 0.12s;
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-color-trigger:hover { border-color: var(--text-muted); }
+
+.skeleton-color-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Canvas background swatch in toolbar */
+.canvas-bg-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--input-radius);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+}
+.canvas-bg-swatch:hover { border-color: var(--text-muted); }
+.canvas-bg-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .color-remove-btn {

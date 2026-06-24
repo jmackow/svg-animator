@@ -1085,6 +1085,76 @@ export default function PropertiesPanel() {
             <ColorRow layerId={layer.id} property="strokeColor" />
           </div>
 
+          {layer.skeletonMode && (
+            <div className="prop-section">
+              <div className="prop-section-title">Skeleton</div>
+              {(
+                [
+                  { key: 'stroke', label: 'Outline', def: '#ffffff' },
+                  { key: 'fill',   label: 'Fill',    def: '#ffffff' },
+                  { key: 'anchor', label: 'Anchors', def: '#ff9d3a' },
+                ] as { key: 'stroke' | 'fill' | 'anchor'; label: string; def: string }[]
+              ).map(({ key, label, def }) => {
+                const hex = layer.skeletonColors?.[key] ?? def;
+                return (
+                  <div key={key} className="color-prop-row">
+                    <span className="color-prop-label">{label}</span>
+                    <label className="skeleton-color-trigger">
+                      <div className="color-swatch" style={{ background: hex }} />
+                      <span className="color-hex-label">{hex.slice(1).toUpperCase()}</span>
+                      <input
+                        type="color"
+                        value={hex}
+                        onChange={e => dispatch({
+                          type: 'SET_LAYER_SKELETON_COLORS',
+                          layerId: layer.id,
+                          colors: { [key]: e.target.value },
+                        })}
+                        className="skeleton-color-native"
+                      />
+                    </label>
+                  </div>
+                );
+              })}
+              {(() => {
+                const sk = layer.skeletonColors ?? {};
+                function skNum(field: 'strokeWidth'|'handleScale'|'strokeOpacity'|'fillOpacity'|'patternSize', label: string, def: number, step: number, min = 0.01) {
+                  return (
+                    <div className="compact-prop">
+                      <span className="compact-prop-label">{label}</span>
+                      <input
+                        className="prop-input compact-prop-input"
+                        type="number"
+                        min={min}
+                        step={step}
+                        value={sk[field] ?? def}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value);
+                          if (!isNaN(v) && v >= min) dispatch({ type: 'SET_LAYER_SKELETON_COLORS', layerId: layer!.id, colors: { [field]: v } });
+                        }}
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ padding: '2px 8px 4px' }}>
+                    <div className="prop-grid-2col">
+                      {skNum('strokeOpacity', 'Outline A', 0.9, 0.05, 0)}
+                      {skNum('fillOpacity',   'Fill A',    0.32, 0.05, 0)}
+                    </div>
+                    <div className="prop-grid-2col">
+                      {skNum('strokeWidth',   'Stroke W',  1,   0.5, 0.1)}
+                      {skNum('handleScale',   'Handle ×',  1,   0.1, 0.1)}
+                    </div>
+                    <div className="prop-grid-2col">
+                      {skNum('patternSize',   'Pattern px', 8,  1,   1)}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
           {/* Motion Path */}
           {layer.motionPathId && (
             <div className="prop-section">

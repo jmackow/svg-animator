@@ -122,6 +122,8 @@ export interface Layer {
   defaultStroke?: string;  // hex color read from element on import
   fillNone?: boolean;
   strokeNone?: boolean;
+  skeletonMode?: boolean;
+  skeletonColors?: { stroke?: string; strokeOpacity?: number; fill?: string; fillOpacity?: number; anchor?: string; strokeWidth?: number; handleScale?: number; patternSize?: number };
   fillGradient?: GradientDef;
   strokeGradient?: GradientDef;
   pathKeyframes?: PathKeyframe[]; // shape/morph keyframes
@@ -155,4 +157,5 @@ export interface AppState {
   loopPlayback: boolean;
   selectedPointId: string | null;   // selected anchor point id within the selected layer
   selectedPathKfIds: string[];       // selected path keyframe ids (in timeline)
+  canvasBackground: string | null;
 }

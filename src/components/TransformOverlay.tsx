@@ -8,6 +8,7 @@ interface Props {
   svgContainerRef: React.RefObject<HTMLDivElement>;
   canvasWidth: number;
   canvasHeight: number;
+  canvasZoom: number;
 }
 
 // Describes how to convert SVG user coords → overlay canvas coords
@@ -58,7 +59,7 @@ interface DragState {
   startMovingBboxH?: number;
 }
 
-export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasHeight }: Props) {
+export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasHeight, canvasZoom }: Props) {
   const { state, dispatch, getOrCreateKfAt } = useApp();
   const { setGuides } = useSnapGuides();
   const overlayRef = useRef<SVGSVGElement>(null);
@@ -168,8 +169,8 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
   const edgeLen = Math.sqrt(edgeX * edgeX + edgeY * edgeY) || 1;
   const perpX = -edgeY / edgeLen;
   const perpY =  edgeX / edgeLen;
-  const rhx = topCx + perpX * 28;
-  const rhy = topCy + perpY * 28;
+  const rhx = topCx + perpX * (28 / canvasZoom);
+  const rhy = topCy + perpY * (28 / canvasZoom);
 
   // ── Move drag ──────────────────────────────────────────────────────────────
   function onMoveDragStart(e: React.MouseEvent) {
@@ -502,29 +503,27 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
     <svg
       ref={overlayRef}
       className="transform-overlay"
-      width={canvasWidth}
-      height={canvasHeight}
       viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
-      style={{ pointerEvents: 'none' }}
+      style={{ pointerEvents: 'none', width: '100%', height: '100%' }}
     >
       {/* Bounding box polygon */}
       <polygon
         points={polyPoints}
         fill="transparent"
         stroke="#0092FF"
-        strokeWidth={1.5}
-        strokeDasharray="4,3"
+        strokeWidth={1.5 / canvasZoom}
+        strokeDasharray={`${4 / canvasZoom},${3 / canvasZoom}`}
         style={{ pointerEvents: 'all', cursor: 'move' }}
         onMouseDown={onMoveDragStart}
       />
 
-      {/* Corner handles — scale */}
+      {/* Corner handles — sizes divided by canvasZoom so they stay constant on screen */}
       {corners.map(([hx, hy], i) => (
         <rect
           key={i}
-          x={hx - 5} y={hy - 5}
-          width={10} height={10}
-          fill="#0092FF" stroke="#333333" strokeWidth={1} rx={1}
+          x={hx - 5 / canvasZoom} y={hy - 5 / canvasZoom}
+          width={10 / canvasZoom} height={10 / canvasZoom}
+          fill="#0092FF" stroke="#333333" strokeWidth={1 / canvasZoom} rx={1 / canvasZoom}
           style={{ pointerEvents: 'all', cursor: cornerCursors[i] }}
           onMouseDown={(e) => onScaleDragStart(e, i)}
         />
@@ -534,24 +533,24 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
       <line
         x1={topCx} y1={topCy}
         x2={rhx} y2={rhy}
-        stroke="#0092FF" strokeWidth={1} strokeDasharray="3,2"
+        stroke="#0092FF" strokeWidth={1 / canvasZoom} strokeDasharray={`${3 / canvasZoom},${2 / canvasZoom}`}
         style={{ pointerEvents: 'none' }}
       />
 
       {/* Rotation handle */}
       <circle
-        cx={rhx} cy={rhy} r={6}
-        fill="#0092FF" stroke="#333333" strokeWidth={2}
+        cx={rhx} cy={rhy} r={6 / canvasZoom}
+        fill="#0092FF" stroke="#333333" strokeWidth={2 / canvasZoom}
         style={{ pointerEvents: 'all', cursor: 'crosshair' }}
         onMouseDown={onRotateDragStart}
       />
 
       {/* Anchor handle (pivot point) */}
       <g style={{ pointerEvents: 'all', cursor: 'crosshair' }} onMouseDown={onAnchorDragStart}>
-        <circle cx={pivotX} cy={pivotY} r={9} fill="transparent" />
-        <line x1={pivotX - 7} y1={pivotY} x2={pivotX + 7} y2={pivotY} stroke="#f7c542" strokeWidth={1.5} />
-        <line x1={pivotX} y1={pivotY - 7} x2={pivotX} y2={pivotY + 7} stroke="#f7c542" strokeWidth={1.5} />
-        <circle cx={pivotX} cy={pivotY} r={3} fill="none" stroke="#f7c542" strokeWidth={1.5} />
+        <circle cx={pivotX} cy={pivotY} r={9 / canvasZoom} fill="transparent" />
+        <line x1={pivotX - 7 / canvasZoom} y1={pivotY} x2={pivotX + 7 / canvasZoom} y2={pivotY} stroke="#f7c542" strokeWidth={1.5 / canvasZoom} />
+        <line x1={pivotX} y1={pivotY - 7 / canvasZoom} x2={pivotX} y2={pivotY + 7 / canvasZoom} stroke="#f7c542" strokeWidth={1.5 / canvasZoom} />
+        <circle cx={pivotX} cy={pivotY} r={3 / canvasZoom} fill="none" stroke="#f7c542" strokeWidth={1.5 / canvasZoom} />
       </g>
     </svg>
   );
