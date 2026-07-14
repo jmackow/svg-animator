@@ -1,13 +1,15 @@
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { PathPoint, PathKeyframe, DEFAULT_EASING } from '../types';
-import { parsePath, buildPath, interpolatePathPoints, alignPointIds } from '../utils/pathPoints';
+import { parsePath, interpolatePathPoints, alignPointIds } from '../utils/pathPoints';
 import { useSnapGuides } from '../context/SnapContext';
 import { snapPointMove, SNAP_THRESHOLD_SCREEN, PointSnapTarget } from '../utils/snap';
 
 interface Props {
   svgContainerRef: React.RefObject<HTMLDivElement>;
   canvasFrameRef: React.RefObject<HTMLDivElement>;
+  canvasWidth: number;
+  canvasHeight: number;
   canvasZoom: number;
 }
 
@@ -49,9 +51,10 @@ function clientToUser(clientX: number, clientY: number, svgContainerRef: React.R
 
 function makeKfId() { return `pkf-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 
-export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canvasZoom }: Props) {
+export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canvasWidth, canvasHeight, canvasZoom }: Props) {
   const { state, dispatch } = useApp();
   const { setGuides } = useSnapGuides();
+  const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
   // Cache parsed points by "elementId:d" so IDs stay stable across renders
   const parsedCacheRef = useRef<{ key: string; points: PathPoint[] } | null>(null);
 
@@ -63,24 +66,38 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
     ? interpolatePathPoints(layer.pathKeyframes ?? [], currentTime)
     : null;
 
-  const getElD = useCallback((): string | null => {
+  // Returns { attr, closed, isPoly } where attr is the raw shape string for the element.
+  // path → d attribute; polygon/polyline → points attribute.
+  function getElRawShape(): { attr: string; closed: boolean; isPoly: boolean } | null {
     if (!layer) return null;
     const svgEl = svgContainerRef.current?.querySelector('svg') as SVGSVGElement | null;
     if (!svgEl) return null;
     const el = svgEl.getElementById(layer.elementId);
-    return el?.getAttribute('d') ?? null;
-  }, [layer, svgContainerRef]);
+    if (!el) return null;
+    const tag = layer.tagName.toLowerCase();
+    if (tag === 'path') {
+      const d = el.getAttribute('d');
+      return d ? { attr: d, closed: false, isPoly: false } : null;
+    }
+    if (tag === 'polygon' || tag === 'polyline') {
+      const pts = el.getAttribute('points');
+      return pts ? { attr: pts, closed: tag === 'polygon', isPoly: true } : null;
+    }
+    return null;
+  }
 
-  // Apply animated `d` back to the element when path keyframes are active
-  useEffect(() => {
-    if (!layer?.pathKeyframes?.length || !livePoints) return;
-    const svgEl = svgContainerRef.current?.querySelector('svg') as SVGSVGElement | null;
-    if (!svgEl) return;
-    const el = svgEl.getElementById(layer.elementId);
-    if (!el) return;
-    const closed = (layer.pathKeyframes[0]?.closed) ?? false;
-    el.setAttribute('d', buildPath(livePoints, closed));
-  }, [livePoints, layer, svgContainerRef]);
+  // Parse a poly points string ("x1,y1 x2,y2 ...") into PathPoint array.
+  // idBase makes IDs deterministic so overlay and panel always agree.
+  function parsePolyAttr(attr: string, idBase?: string): PathPoint[] {
+    const nums = attr.trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+    const pts: PathPoint[] = [];
+    for (let i = 0; i + 1 < nums.length; i += 2) {
+      const idx = pts.length;
+      const x = nums[i], y = nums[i + 1];
+      pts.push({ id: idBase ? `${idBase}-${idx}` : makeKfId(), x, y, cpInX: x, cpInY: y, cpOutX: x, cpOutY: y, type: 'corner' });
+    }
+    return pts;
+  }
 
   // Get or create a path keyframe at current time, returns the kf id + points
   function getOrCreateKf(): { kfId: string; points: PathPoint[]; closed: boolean } | null {
@@ -88,9 +105,16 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
     const existing = (layer.pathKeyframes ?? []).find(kf => Math.abs(kf.time - currentTime) < 0.001);
     if (existing) return { kfId: existing.id, points: existing.points, closed: existing.closed };
 
-    const d = getElD();
-    if (!d) return null;
-    const { points, closed } = parsePath(d);
+    const raw = getElRawShape();
+    if (!raw) return null;
+    let points: PathPoint[];
+    let closed: boolean;
+    if (raw.isPoly) {
+      points = parsePolyAttr(raw.attr, layer.elementId);
+      closed = raw.closed;
+    } else {
+      ({ points, closed } = parsePath(raw.attr, layer.elementId));
+    }
     const ref = layer.pathKeyframes?.[0];
     const aligned = ref ? alignPointIds(points, ref.points) : points;
     if (ref && aligned.length !== ref.points.length) return null;
@@ -283,11 +307,12 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
   // Decide which points to render
   let displayPoints: PathPoint[] | null = (livePoints?.length ?? 0) > 0 ? livePoints : null;
   if (!displayPoints) {
-    const d = getElD();
-    if (d) {
-      const cacheKey = `${layer.elementId}:${d}`;
+    const raw = getElRawShape();
+    if (raw) {
+      const cacheKey = `${layer.elementId}:${raw.attr}`;
       if (parsedCacheRef.current?.key !== cacheKey) {
-        parsedCacheRef.current = { key: cacheKey, points: parsePath(d).points };
+        const pts = raw.isPoly ? parsePolyAttr(raw.attr, layer.elementId) : parsePath(raw.attr, layer.elementId).points;
+        parsedCacheRef.current = { key: cacheKey, points: pts };
       }
       displayPoints = parsedCacheRef.current.points;
     }
@@ -304,8 +329,7 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
   const mapping = getMapping(svgContainerRef, canvasFrameRef, canvasZoom, layer.elementId);
   if (!mapping) return null;
 
-  const ANCHOR_R = 5 / canvasZoom;
-  const ANCHOR_HIT_R = 14 / canvasZoom;   // large transparent hit area
+  const ANCHOR_R = 8 / canvasZoom;
   const HANDLE_R = 3.5 / canvasZoom;
   const HANDLE_HIT_R = 10 / canvasZoom;
   const STROKE = 1.5 / canvasZoom;
@@ -315,6 +339,7 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
 
   return (
     <svg
+      viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
       style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}
     >
       {displayPoints.map((pt) => {
@@ -333,6 +358,7 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
 
         const PURPLE = '#7c6cf7';
         const PURPLE_DIM = '#7c6cf799';
+        const isHovered = pt.id === hoveredPointId;
 
         return (
           <g key={pt.id}>
@@ -372,18 +398,16 @@ export default function PathPointOverlay({ svgContainerRef, canvasFrameRef, canv
               <circle cx={a.x} cy={a.y} r={ANCHOR_R + 3 / canvasZoom}
                 fill="none" stroke="#fff" strokeWidth={STROKE} opacity={0.8} style={{ pointerEvents: 'none' }} />
             )}
-            {/* Visual anchor */}
-            <circle cx={a.x} cy={a.y} r={ANCHOR_R}
-              fill={isSelected ? PURPLE : PURPLE_DIM}
+            {/* Anchor — visual and hitbox are the same circle */}
+            <circle cx={a.x} cy={a.y} r={isHovered ? ANCHOR_R * 2 : ANCHOR_R}
+              fill={isSelected || isHovered ? PURPLE : PURPLE_DIM}
               stroke={isSelected ? '#fff' : PURPLE}
               strokeWidth={isSelected ? STROKE : STROKE * 0.67}
-              style={{ pointerEvents: 'none' }}
-            />
-            {/* Large transparent hit area — keeps clicks from deselecting the layer */}
-            <circle cx={a.x} cy={a.y} r={ANCHOR_HIT_R} fill="transparent"
-              style={{ pointerEvents: 'all', cursor: 'move' }}
+              style={{ pointerEvents: 'all', cursor: 'pointer' }}
+              onMouseEnter={() => setHoveredPointId(pt.id)}
+              onMouseLeave={() => setHoveredPointId(null)}
               onMouseDown={(e) => startPointDrag(e, pt.id)}
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); getOrCreateKf(); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
             />
           </g>
         );

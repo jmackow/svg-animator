@@ -766,9 +766,23 @@ function PathPointSection({ layerId }: { layerId: string }) {
     const svgEl = document.querySelector('.svg-host svg') as SVGSVGElement | null;
     if (!svgEl) return null;
     const el = svgEl.getElementById(layer.elementId);
-    const d = el?.getAttribute('d');
+    if (!el) return null;
+    const tag = layer.tagName.toLowerCase();
+    if (tag === 'polygon' || tag === 'polyline') {
+      const attr = el.getAttribute('points');
+      if (!attr) return null;
+      const nums = attr.trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+      const points: PathPoint[] = [];
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const idx = points.length;
+        const x = nums[i], y = nums[i + 1];
+        points.push({ id: `${layer.elementId}-${idx}`, x, y, cpInX: x, cpInY: y, cpOutX: x, cpOutY: y, type: 'corner' });
+      }
+      return points.length > 0 ? { points, closed: tag === 'polygon' } : null;
+    }
+    const d = el.getAttribute('d');
     if (!d) return null;
-    return parsePath(d);
+    return parsePath(d, layer.elementId);
   }
 
   const displayPoints: PathPoint[] | null = livePoints && livePoints.length > 0
@@ -791,6 +805,14 @@ function PathPointSection({ layerId }: { layerId: string }) {
         )}
       </div>
     );
+  }
+
+  function addKfFromCurrent() {
+    const pts = displayPoints!;
+    const ref = layer.pathKeyframes?.[0];
+    const aligned = ref ? alignPointIds(pts, ref.points) : pts;
+    const elData = getLiveElPoints();
+    dispatch({ type: 'ADD_PATH_KEYFRAME', layerId, keyframe: { id: makeKfId(), time: currentTime, points: aligned, closed: elData?.closed ?? false, easing: DEFAULT_EASING, movedPointIds: selectedPointId ? [selectedPointId] : [] } });
   }
 
   function updatePoint(patch: Partial<PathPoint>) {
@@ -823,23 +845,25 @@ function PathPointSection({ layerId }: { layerId: string }) {
 
   return (
     <div className="prop-section">
-      <div className="prop-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span>Anchor Point</span>
+      <div className="prop-section-title">Anchor Point</div>
+      {/* X / Y with inline keyframe button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px 2px' }}>
+        <div className="compact-prop" style={{ flex: 1 }}>
+          <span className="compact-prop-label">X</span>
+          <input className="compact-prop-input" type="number" step={0.5} value={selectedPt.x.toFixed(1)}
+            disabled={!hasKfHere}
+            onChange={e => { const val = parseFloat(e.target.value); if (!isNaN(val)) updatePoint({ x: val, cpInX: val + (selectedPt.cpInX - selectedPt.x), cpOutX: val + (selectedPt.cpOutX - selectedPt.x) }); }} />
+        </div>
+        <div className="compact-prop" style={{ flex: 1 }}>
+          <span className="compact-prop-label">Y</span>
+          <input className="compact-prop-input" type="number" step={0.5} value={selectedPt.y.toFixed(1)}
+            disabled={!hasKfHere}
+            onChange={e => { const val = parseFloat(e.target.value); if (!isNaN(val)) updatePoint({ y: val, cpInY: val + (selectedPt.cpInY - selectedPt.y), cpOutY: val + (selectedPt.cpOutY - selectedPt.y) }); }} />
+        </div>
         <button
           className={`kf-toggle-btn ${hasKfHere ? 'kf-toggle-btn--active' : ''}`}
           title={hasKfHere ? 'Remove shape keyframe' : 'Add shape keyframe'}
-          onClick={() => {
-            if (kfAtPlayhead) {
-              dispatch({ type: 'DELETE_PATH_KEYFRAME', layerId, keyframeId: kfAtPlayhead.id });
-            } else {
-              const pts = displayPoints!;
-              const ref = layer.pathKeyframes?.[0];
-              const aligned = ref ? alignPointIds(pts, ref.points) : pts;
-              const elData = getLiveElPoints();
-              dispatch({ type: 'ADD_PATH_KEYFRAME', layerId, keyframe: { id: makeKfId(), time: currentTime, points: aligned, closed: elData?.closed ?? false, easing: DEFAULT_EASING, movedPointIds: selectedPointId ? [selectedPointId] : [] } });
-            }
-          }}
-          style={{ marginRight: 8 }}
+          onClick={() => { if (kfAtPlayhead) { dispatch({ type: 'DELETE_PATH_KEYFRAME', layerId, keyframeId: kfAtPlayhead.id }); } else { addKfFromCurrent(); } }}
         >◆</button>
       </div>
       <div className="prop-row" style={{ padding: '4px 8px', gap: 4 }}>
@@ -851,18 +875,6 @@ function PathPointSection({ layerId }: { layerId: string }) {
               {t === 'corner' ? 'Corner' : t === 'smooth' ? 'Smooth' : 'Asym'}
             </button>
           ))}
-        </div>
-      </div>
-      <div className="prop-grid-2col">
-        <div className="compact-prop">
-          <span className="compact-prop-label">X</span>
-          <input className="compact-prop-input" type="number" step={0.5} value={selectedPt.x.toFixed(1)}
-            onChange={e => { const val = parseFloat(e.target.value); if (!isNaN(val)) updatePoint({ x: val, cpInX: val + (selectedPt.cpInX - selectedPt.x), cpOutX: val + (selectedPt.cpOutX - selectedPt.x) }); }} />
-        </div>
-        <div className="compact-prop">
-          <span className="compact-prop-label">Y</span>
-          <input className="compact-prop-input" type="number" step={0.5} value={selectedPt.y.toFixed(1)}
-            onChange={e => { const val = parseFloat(e.target.value); if (!isNaN(val)) updatePoint({ y: val, cpInY: val + (selectedPt.cpInY - selectedPt.y), cpOutY: val + (selectedPt.cpOutY - selectedPt.y) }); }} />
         </div>
       </div>
       {selectedPt.type !== 'corner' && (

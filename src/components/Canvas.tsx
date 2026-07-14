@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { GradientDef } from '../types';
 import { getLayerValues, unpackColor } from '../utils/interpolate';
+import { interpolatePathPoints, buildPath } from '../utils/pathPoints';
 
 function applyGradientToDefs(svgEl: SVGSVGElement, gradId: string, grad: GradientDef): string {
   const ns = 'http://www.w3.org/2000/svg';
@@ -339,6 +340,20 @@ export default function Canvas() {
 
       s.transform = `translate(${vals.x + adjX}px, ${vals.y + adjY}px) rotate(${vals.rotation}deg) scale(${vals.scaleX}, ${vals.scaleY})`;
       s.opacity = String(vals.opacity);
+
+      // Path keyframe shape animation — runs for every layer, not just the selected one
+      if (layer.pathKeyframes && layer.pathKeyframes.length > 0) {
+        const pts = interpolatePathPoints(layer.pathKeyframes, state.currentTime);
+        if (pts) {
+          const tag = layer.tagName.toLowerCase();
+          const closed = layer.pathKeyframes[0]?.closed ?? false;
+          if (tag === 'polygon' || tag === 'polyline') {
+            el.setAttribute('points', pts.map(p => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join(' '));
+          } else {
+            el.setAttribute('d', buildPath(pts, closed));
+          }
+        }
+      }
     }
   }, [state.layers, state.currentTime, state.motionPaths]);
 
@@ -436,7 +451,11 @@ export default function Canvas() {
       dispatch({ type: 'SET_SELECTED_MOTION_PATH', id: null });
       if (e.metaKey || e.ctrlKey) {
         const layer = findLayer(target);
-        dispatch({ type: 'SELECT_LAYER', layerId: layer?.id ?? null });
+        if (layer) {
+          dispatch({ type: 'ADD_TO_LAYER_SELECTION', layerId: layer.id });
+        } else {
+          dispatch({ type: 'SELECT_LAYER', layerId: null });
+        }
         setEnteredGroupId(null);
         return;
       }
@@ -611,20 +630,15 @@ export default function Canvas() {
                 canvasHeight={state.canvasHeight}
                 canvasZoom={state.canvasZoom}
               />
-              <PathPointOverlay
-                svgContainerRef={svgContainerRef}
-                canvasFrameRef={canvasFrameRef}
-                canvasZoom={state.canvasZoom}
-              />
               <SkeletonOverlay
                 svgContainerRef={svgContainerRef}
                 canvasFrameRef={canvasFrameRef}
                 canvasZoom={state.canvasZoom}
               />
             </div>
-            {/* TransformOverlay / CmdHoverOverlay / SnapGuideOverlay live OUTSIDE the CSS-scaled
-                frame so their SVG coordinates are never multiplied by canvasZoom. They cover the
-                full zoomed area via width/height 100% on their SVG elements. */}
+            {/* TransformOverlay / CmdHoverOverlay / SnapGuideOverlay / PathPointOverlay live
+                OUTSIDE the CSS-scaled frame. PathPointOverlay is last so it renders on top of
+                TransformOverlay — anchor circles intercept events before the bounding box does. */}
             <SnapProvider>
               <TransformOverlay
                 svgContainerRef={svgContainerRef}
@@ -638,6 +652,13 @@ export default function Canvas() {
                 canvasHeight={state.canvasHeight}
               />
               <SnapGuideOverlay canvasWidth={state.canvasWidth} canvasHeight={state.canvasHeight} />
+              <PathPointOverlay
+                svgContainerRef={svgContainerRef}
+                canvasFrameRef={canvasFrameRef}
+                canvasWidth={state.canvasWidth}
+                canvasHeight={state.canvasHeight}
+                canvasZoom={state.canvasZoom}
+              />
             </SnapProvider>
           </div>
         </div>

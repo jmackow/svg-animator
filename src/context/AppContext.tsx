@@ -34,6 +34,7 @@ const initialState: AppState = {
   svgSource: null,
   layers: [],
   selectedLayerId: null,
+  selectedLayerIds: [],
   selectedKeyframes: [],
   currentTime: 0,
   duration: 3,
@@ -60,6 +61,7 @@ export type Action =
   | { type: 'LOAD_SVG'; svgSource: string; layers: AppState['layers'] }
   | { type: 'LOAD_PROJECT'; svgSource: string; layers: AppState['layers']; duration: number; canvasWidth: number; canvasHeight: number; motionPaths?: MotionPath[] }
   | { type: 'SELECT_LAYER'; layerId: string | null }
+  | { type: 'ADD_TO_LAYER_SELECTION'; layerId: string }
   | { type: 'SELECT_KEYFRAMES'; kfs: SelectedKeyframe[] }
   | { type: 'ADD_TO_KEYFRAME_SELECTION'; kfs: SelectedKeyframe[] }
   | { type: 'MOVE_SELECTED_KFS_DELTA'; delta: number }
@@ -104,9 +106,10 @@ export type Action =
   | { type: 'SET_LOOP_PLAYBACK'; loop: boolean }
   | { type: 'SELECT_POINT'; pointId: string | null }
   | { type: 'ADD_PATH_KEYFRAME'; layerId: string; keyframe: PathKeyframe }
-  | { type: 'UPDATE_PATH_KEYFRAME'; layerId: string; keyframeId: string; points: PathPoint[]; movedPointId?: string }
+  | { type: 'UPDATE_PATH_KEYFRAME'; layerId: string; keyframeId: string; points: PathPoint[]; movedPointId?: string; movedPointIds?: string[] }
   | { type: 'DELETE_PATH_KEYFRAME'; layerId: string; keyframeId: string }
-  | { type: 'UPDATE_PATH_KEYFRAME_SILENT'; layerId: string; keyframeId: string; points: PathPoint[]; movedPointId?: string }
+  | { type: 'UPDATE_PATH_KEYFRAME_SILENT'; layerId: string; keyframeId: string; points: PathPoint[]; movedPointId?: string; movedPointIds?: string[] }
+  | { type: 'UPDATE_PATH_KEYFRAME_EASING'; layerId: string; keyframeId: string; easing: EasingConfig }
   | { type: 'MOVE_PATH_KEYFRAME'; layerId: string; keyframeId: string; time: number }
   | { type: 'MOVE_PATH_KEYFRAME_SILENT'; layerId: string; keyframeId: string; time: number }
   | { type: 'SELECT_PATH_KEYFRAMES'; kfIds: string[] }
@@ -199,23 +202,43 @@ function updateTrack(
 function coreReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'LOAD_SVG':
-      return { ...state, svgSource: action.svgSource, layers: action.layers, selectedLayerId: null, selectedKeyframes: [], currentTime: 0, drawingMotionPathId: null };
+      return { ...state, svgSource: action.svgSource, layers: action.layers, selectedLayerId: null, selectedLayerIds: [], selectedKeyframes: [], currentTime: 0, drawingMotionPathId: null };
 
     case 'LOAD_PROJECT':
-      return { ...state, svgSource: action.svgSource, layers: action.layers, duration: action.duration, canvasWidth: action.canvasWidth, canvasHeight: action.canvasHeight, selectedLayerId: null, selectedKeyframes: [], currentTime: 0, isPlaying: false, motionPaths: action.motionPaths ?? [], drawingMotionPathId: null };
+      return { ...state, svgSource: action.svgSource, layers: action.layers, duration: action.duration, canvasWidth: action.canvasWidth, canvasHeight: action.canvasHeight, selectedLayerId: null, selectedLayerIds: [], selectedKeyframes: [], currentTime: 0, isPlaying: false, motionPaths: action.motionPaths ?? [], drawingMotionPathId: null };
 
     case 'SELECT_LAYER': {
       const sameLayer = action.layerId !== null && action.layerId === state.selectedLayerId;
       return {
         ...state,
         selectedLayerId: action.layerId,
+        selectedLayerIds: action.layerId ? [action.layerId] : [],
         selectedKeyframes: [],
         selectedPathKfIds: [],
         selectedPointId: sameLayer ? state.selectedPointId : null,
-        // Auto-expand newly selected layer so its tracks are visible; don't collapse if re-clicking same layer
         layers: action.layerId && !sameLayer
           ? updateLayer(state.layers, action.layerId, l => ({ ...l, expanded: true }))
           : state.layers,
+      };
+    }
+
+    case 'ADD_TO_LAYER_SELECTION': {
+      const alreadyIn = state.selectedLayerIds.includes(action.layerId);
+      if (alreadyIn) {
+        const newIds = state.selectedLayerIds.filter(id => id !== action.layerId);
+        return {
+          ...state,
+          selectedLayerIds: newIds,
+          selectedLayerId: newIds.length > 0 ? newIds[newIds.length - 1] : null,
+        };
+      }
+      return {
+        ...state,
+        selectedLayerIds: [...state.selectedLayerIds, action.layerId],
+        selectedLayerId: action.layerId,
+        selectedKeyframes: [],
+        selectedPathKfIds: [],
+        layers: updateLayer(state.layers, action.layerId, l => ({ ...l, expanded: true })),
       };
     }
 
@@ -464,9 +487,11 @@ function coreReducer(state: AppState, action: Action): AppState {
           ...l,
           pathKeyframes: (l.pathKeyframes ?? []).map(kf => {
             if (kf.id !== action.keyframeId) return kf;
-            const movedPointIds = action.movedPointId
-              ? Array.from(new Set([...(kf.movedPointIds ?? []), action.movedPointId]))
-              : kf.movedPointIds;
+            const movedPointIds = action.movedPointIds
+              ? action.movedPointIds
+              : action.movedPointId
+                ? Array.from(new Set([...(kf.movedPointIds ?? []), action.movedPointId]))
+                : kf.movedPointIds;
             return { ...kf, points: action.points, movedPointIds };
           }),
         })),
@@ -478,6 +503,17 @@ function coreReducer(state: AppState, action: Action): AppState {
         layers: updateLayer(state.layers, action.layerId, l => ({
           ...l,
           pathKeyframes: (l.pathKeyframes ?? []).filter(kf => kf.id !== action.keyframeId),
+        })),
+      };
+
+    case 'UPDATE_PATH_KEYFRAME_EASING':
+      return {
+        ...state,
+        layers: updateLayer(state.layers, action.layerId, l => ({
+          ...l,
+          pathKeyframes: (l.pathKeyframes ?? []).map(kf =>
+            kf.id === action.keyframeId ? { ...kf, easing: action.easing } : kf
+          ),
         })),
       };
 
@@ -509,6 +545,7 @@ function coreReducer(state: AppState, action: Action): AppState {
         svgSource: action.newSvgSource,
         layers: state.layers.filter(l => !deletedIds.has(l.id)),
         selectedLayerId: deletedIds.has(state.selectedLayerId ?? '') ? null : state.selectedLayerId,
+        selectedLayerIds: state.selectedLayerIds.filter(id => !deletedIds.has(id)),
         selectedKeyframes: state.selectedKeyframes.filter(kf => !deletedIds.has(kf.layerId)),
         selectedPathKfIds: [],
       };

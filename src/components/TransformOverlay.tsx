@@ -57,6 +57,7 @@ interface DragState {
   startMovingBboxY?: number;
   startMovingBboxW?: number;
   startMovingBboxH?: number;
+  additionalMoves?: Array<{ layerId: string; startX: number; startY: number; kfIdX?: string; kfIdY?: string; useBaseX: boolean; useBaseY: boolean }>;
 }
 
 export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasHeight, canvasZoom }: Props) {
@@ -185,6 +186,27 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
     const kfIdX = xEmpty ? undefined : getOrCreateKfAt(selectedLayer.id, 'x', state.currentTime, true);
     const kfIdY = yEmpty ? undefined : getOrCreateKfAt(selectedLayer.id, 'y', state.currentTime, true);
 
+    // Capture start state for every other selected layer
+    const additionalMoves = state.selectedLayerIds
+      .filter(id => id !== selectedLayer.id)
+      .map(id => {
+        const l = state.layers.find(layer => layer.id === id);
+        if (!l || l.locked) return null;
+        const lxEmpty = l.tracks.x.length === 0;
+        const lyEmpty = l.tracks.y.length === 0;
+        const lv = getLayerValues(l, state.currentTime);
+        return {
+          layerId: id,
+          startX: lv.x,
+          startY: lv.y,
+          kfIdX: lxEmpty ? undefined : getOrCreateKfAt(id, 'x', state.currentTime, true),
+          kfIdY: lyEmpty ? undefined : getOrCreateKfAt(id, 'y', state.currentTime, true),
+          useBaseX: lxEmpty,
+          useBaseY: lyEmpty,
+        };
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null);
+
     const svgEl = svgContainerRef.current?.querySelector('svg') as SVGSVGElement | null;
     const snapTargets: LayerAabb[] = [];
     if (svgEl) {
@@ -215,6 +237,7 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
       startMovingBboxY: bboxY,
       startMovingBboxW: bboxW,
       startMovingBboxH: bboxH,
+      additionalMoves,
     };
 
     function applySnapToDeltas(rawDx: number, rawDy: number, drag: DragState): [number, number] {
@@ -238,21 +261,26 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
       return [snapped.x - (drag.startX ?? 0), snapped.y - (drag.startY ?? 0)];
     }
 
+    function applyMoveTo(
+      layerId: string, sx: number, sy: number,
+      kfX: string | undefined, kfY: string | undefined,
+      useX: boolean, useY: boolean, dx: number, dy: number
+    ) {
+      if (useX) dispatch({ type: 'SET_LAYER_BASE_VALUE_SILENT', layerId, property: 'x', value: sx + dx });
+      else if (kfX) dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME_SILENT', layerId, property: 'x', keyframeId: kfX, value: sx + dx });
+      if (useY) dispatch({ type: 'SET_LAYER_BASE_VALUE_SILENT', layerId, property: 'y', value: sy + dy });
+      else if (kfY) dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME_SILENT', layerId, property: 'y', keyframeId: kfY, value: sy + dy });
+    }
+
     function onMouseMove(mv: MouseEvent) {
       const drag = dragRef.current;
       if (!drag || drag.type !== 'move') return;
       const rawDx = screenDxToSvg(mv.clientX - (drag.startMx ?? 0));
       const rawDy = screenDyToSvg(mv.clientY - (drag.startMy ?? 0));
       const [dx, dy] = applySnapToDeltas(rawDx, rawDy, drag);
-      if (drag.useBaseX) {
-        dispatch({ type: 'SET_LAYER_BASE_VALUE_SILENT', layerId: selectedLayer!.id, property: 'x', value: (drag.startX ?? 0) + dx });
-      } else if (drag.kfIdX) {
-        dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME_SILENT', layerId: selectedLayer!.id, property: 'x', keyframeId: drag.kfIdX, value: (drag.startX ?? 0) + dx });
-      }
-      if (drag.useBaseY) {
-        dispatch({ type: 'SET_LAYER_BASE_VALUE_SILENT', layerId: selectedLayer!.id, property: 'y', value: (drag.startY ?? 0) + dy });
-      } else if (drag.kfIdY) {
-        dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME_SILENT', layerId: selectedLayer!.id, property: 'y', keyframeId: drag.kfIdY, value: (drag.startY ?? 0) + dy });
+      applyMoveTo(selectedLayer!.id, drag.startX ?? 0, drag.startY ?? 0, drag.kfIdX, drag.kfIdY, drag.useBaseX ?? true, drag.useBaseY ?? true, dx, dy);
+      for (const am of drag.additionalMoves ?? []) {
+        applyMoveTo(am.layerId, am.startX, am.startY, am.kfIdX, am.kfIdY, am.useBaseX, am.useBaseY, dx, dy);
       }
     }
 
@@ -266,15 +294,9 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
       const rawDy = screenDyToSvg(mv.clientY - (drag.startMy ?? 0));
       const [dx, dy] = applySnapToDeltas(rawDx, rawDy, drag);
       setGuides([]);
-      if (drag.useBaseX) {
-        dispatch({ type: 'SET_LAYER_BASE_VALUE_SILENT', layerId: selectedLayer!.id, property: 'x', value: (drag.startX ?? 0) + dx });
-      } else if (drag.kfIdX) {
-        dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME_SILENT', layerId: selectedLayer!.id, property: 'x', keyframeId: drag.kfIdX, value: (drag.startX ?? 0) + dx });
-      }
-      if (drag.useBaseY) {
-        dispatch({ type: 'SET_LAYER_BASE_VALUE_SILENT', layerId: selectedLayer!.id, property: 'y', value: (drag.startY ?? 0) + dy });
-      } else if (drag.kfIdY) {
-        dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME_SILENT', layerId: selectedLayer!.id, property: 'y', keyframeId: drag.kfIdY, value: (drag.startY ?? 0) + dy });
+      applyMoveTo(selectedLayer!.id, drag.startX ?? 0, drag.startY ?? 0, drag.kfIdX, drag.kfIdY, drag.useBaseX ?? true, drag.useBaseY ?? true, dx, dy);
+      for (const am of drag.additionalMoves ?? []) {
+        applyMoveTo(am.layerId, am.startX, am.startY, am.kfIdX, am.kfIdY, am.useBaseX, am.useBaseY, dx, dy);
       }
     }
 
@@ -506,7 +528,8 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
       viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
       style={{ pointerEvents: 'none', width: '100%', height: '100%' }}
     >
-      {/* Bounding box polygon */}
+      {/* Bounding box polygon — full area interactive for drag-to-move; PathPointOverlay renders
+          on top in DOM order so anchor circles intercept their area first */}
       <polygon
         points={polyPoints}
         fill="transparent"

@@ -26,6 +26,13 @@ interface SegmentPopoverData {
   y: number;
 }
 
+interface PathSegmentPopoverData {
+  layerId: string;
+  kf1Id: string;
+  x: number;
+  y: number;
+}
+
 function SegmentPopover({ data, onClose }: { data: SegmentPopoverData; onClose: () => void }) {
   const { state, dispatch } = useApp();
   const ref = useRef<HTMLDivElement>(null);
@@ -96,6 +103,42 @@ function SegmentPopover({ data, onClose }: { data: SegmentPopoverData; onClose: 
   );
 }
 
+function PathSegmentPopover({ data, onClose }: { data: PathSegmentPopoverData; onClose: () => void }) {
+  const { state, dispatch } = useApp();
+  const ref = useRef<HTMLDivElement>(null);
+
+  const layer = state.layers.find(l => l.id === data.layerId);
+  const kf1 = layer?.pathKeyframes?.find(k => k.id === data.kf1Id);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    window.addEventListener('mousedown', handler, true);
+    return () => window.removeEventListener('mousedown', handler, true);
+  }, [onClose]);
+
+  if (!kf1) return null;
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="segment-popover"
+      style={{ position: 'fixed', left: data.x, top: data.y - 6, transform: 'translate(-50%, -100%)', zIndex: 9999 }}
+      onMouseDown={e => e.stopPropagation()}
+    >
+      <EasingPicker
+        easing={kf1.easing}
+        alwaysOpen
+        onChange={(easing: EasingConfig) => {
+          dispatch({ type: 'UPDATE_PATH_KEYFRAME_EASING', layerId: data.layerId, keyframeId: data.kf1Id, easing });
+        }}
+      />
+    </div>,
+    document.body
+  );
+}
+
 // ─── Marquee state ────────────────────────────────────────────────────────────
 
 interface MarqueeState {
@@ -122,6 +165,7 @@ export default function Timeline() {
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [snapTarget, setSnapTarget] = useState<number | null>(null);
   const [segmentPopover, setSegmentPopover] = useState<SegmentPopoverData | null>(null);
+  const [pathSegmentPopover, setPathSegmentPopover] = useState<PathSegmentPopoverData | null>(null);
   const [editingDurationKey, setEditingDurationKey] = useState<string | null>(null);
 
   const { zoom, duration, currentTime, isPlaying, loopPlayback, layers, snapEnabled, selectedKeyframes, selectedPathKfIds } = state;
@@ -344,36 +388,59 @@ export default function Timeline() {
   function startPathKfDrag(e: React.MouseEvent, layerId: string, kfId: string, kfTime: number) {
     e.preventDefault();
     e.stopPropagation();
+
+    const isInSelection = selectedPathKfIds.includes(kfId);
+
+    let kfIdsToMove: string[];
     if (e.shiftKey) {
       dispatch({ type: 'ADD_TO_PATH_KF_SELECTION', kfIds: [kfId] });
+      kfIdsToMove = [...selectedPathKfIds, kfId];
+    } else if (isInSelection) {
+      kfIdsToMove = selectedPathKfIds;
     } else {
       dispatch({ type: 'SELECT_PATH_KEYFRAMES', kfIds: [kfId] });
+      kfIdsToMove = [kfId];
     }
     dispatch({ type: 'SET_TIME', time: kfTime });
 
+    // Map each kf id → { layerId, startTime } so we can apply a shared delta
+    const startTimes = new Map<string, { lid: string; t: number }>();
+    for (const id of kfIdsToMove) {
+      for (const l of layers) {
+        const kf = l.pathKeyframes?.find(k => k.id === id);
+        if (kf) { startTimes.set(id, { lid: l.id, t: kf.time }); break; }
+      }
+    }
+
     const startMouseX = e.clientX;
-    const startTime = kfTime;
-    const excludeIds = new Set([kfId]);
+    const excludeIds = new Set(kfIdsToMove);
     let moved = false;
+
+    function computeDelta(clientX: number): number {
+      const proposed = kfTime + (clientX - startMouseX) / zoom;
+      const { time: snapped, snapTo } = snapTime(proposed, excludeIds);
+      setSnapTarget(snapTo ?? null);
+      return snapped - kfTime;
+    }
 
     function onMove(mv: MouseEvent) {
       const pixelDelta = mv.clientX - startMouseX;
       if (!moved && Math.abs(pixelDelta) < 2) return;
       moved = true;
-      const proposed = startTime + pixelDelta / zoom;
-      const { time: snapped, snapTo } = snapTime(proposed, excludeIds);
-      setSnapTarget(snapTo);
-      dispatch({ type: 'MOVE_PATH_KEYFRAME_SILENT', layerId, keyframeId: kfId, time: Math.max(0, Math.min(duration, snapped)) });
+      const delta = computeDelta(mv.clientX);
+      for (const [id, { lid, t }] of startTimes) {
+        dispatch({ type: 'MOVE_PATH_KEYFRAME_SILENT', layerId: lid, keyframeId: id, time: Math.max(0, Math.min(duration, t + delta)) });
+      }
     }
     function onUp(mv: MouseEvent) {
       setSnapTarget(null);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       if (!moved) return;
-      const pixelDelta = mv.clientX - startMouseX;
-      const proposed = startTime + pixelDelta / zoom;
-      const { time: snapped } = snapTime(proposed, excludeIds);
-      dispatch({ type: 'MOVE_PATH_KEYFRAME', layerId, keyframeId: kfId, time: Math.max(0, Math.min(duration, snapped)) });
+      const delta = computeDelta(mv.clientX);
+      for (const [id, { lid, t }] of startTimes) {
+        dispatch({ type: 'MOVE_PATH_KEYFRAME', layerId: lid, keyframeId: id, time: Math.max(0, Math.min(duration, t + delta)) });
+      }
     }
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -778,6 +845,9 @@ export default function Timeline() {
       {segmentPopover && (
         <SegmentPopover data={segmentPopover} onClose={() => setSegmentPopover(null)} />
       )}
+      {pathSegmentPopover && (
+        <PathSegmentPopover data={pathSegmentPopover} onClose={() => setPathSegmentPopover(null)} />
+      )}
       {renderRuler()}
 
       <div className="timeline-body" ref={timelineRef} style={{ overflow: 'auto', flex: 1 }} onMouseDown={startMarqueeDrag}>
@@ -874,9 +944,8 @@ export default function Timeline() {
 
                 {/* Shape tracks — one row per point (only points with explicit moves) */}
                 {layer.expanded && (layer.pathKeyframes?.length ?? 0) > 0 && (<>
-                  {/* Per-point rows — only for points that have been explicitly moved */}
                   {layer.pathKeyframes![0].points.map((pt, ptIdx) => {
-                    const ptKfs = layer.pathKeyframes!.filter(kf => kf.movedPointIds?.includes(pt.id));
+                    const ptKfs = [...layer.pathKeyframes!.filter(kf => kf.movedPointIds?.includes(pt.id))].sort((a, b) => a.time - b.time);
                     if (ptKfs.length === 0) return null;
                     return (
                       <div
@@ -888,6 +957,57 @@ export default function Timeline() {
                           <span className="track-prop-name">Pt {ptIdx + 1}</span>
                         </div>
                         <div className="track-area" style={{ position: 'relative' }}>
+                          {/* Easing curves between consecutive keyframes */}
+                          {ptKfs.slice(0, -1).map((kf1, i) => {
+                            const kf2 = ptKfs[i + 1];
+                            const x1 = kf1.time * zoom;
+                            const x2 = kf2.time * zoom;
+                            const gapWidth = x2 - x1;
+                            if (gapWidth <= 0) return null;
+                            return (
+                              <svg
+                                key={kf1.id + '-curve'}
+                                style={{ position: 'absolute', left: x1 + 4, top: (TRACK_HEIGHT - (TRACK_HEIGHT - 10)) / 2, width: Math.max(1, gapWidth - 8), height: TRACK_HEIGHT - 10, overflow: 'visible', pointerEvents: 'none', zIndex: 1 }}
+                              >
+                                <polyline
+                                  points={curvePoints(kf1.easing, Math.max(1, gapWidth - 8), TRACK_HEIGHT - 10, 30)}
+                                  fill="none" stroke="rgba(124,108,247,0.6)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
+                                />
+                              </svg>
+                            );
+                          })}
+
+                          {/* Segment pills between consecutive keyframes */}
+                          {ptKfs.slice(0, -1).map((kf1, i) => {
+                            const kf2 = ptKfs[i + 1];
+                            const x1 = kf1.time * zoom;
+                            const x2 = kf2.time * zoom;
+                            const gapWidth = x2 - x1;
+                            if (gapWidth < 80) return null;
+                            const isOpen = pathSegmentPopover?.kf1Id === kf1.id;
+                            return (
+                              <div
+                                key={kf1.id + '-pill'}
+                                className={`kf-segment-pill${isOpen ? ' kf-segment-pill--open' : ''}`}
+                                style={{ left: x1 + gapWidth / 2, top: '50%', transform: 'translate(-50%, -50%)' }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                              >
+                                <span
+                                  className="kf-segment-pill-easing"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const pill = (e.currentTarget as HTMLElement).closest('.kf-segment-pill') as HTMLElement;
+                                    const rect = pill.getBoundingClientRect();
+                                    setPathSegmentPopover(isOpen ? null : { layerId: layer.id, kf1Id: kf1.id, x: rect.left + rect.width / 2, y: rect.top });
+                                  }}
+                                >
+                                  {easingLabel(kf1.easing)}
+                                </span>
+                              </div>
+                            );
+                          })}
+
+                          {/* Keyframe diamonds */}
                           {ptKfs.map(kf => {
                             const isSelected = selectedPathKfIds.includes(kf.id);
                             return (

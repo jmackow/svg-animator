@@ -49,10 +49,12 @@ export interface ParsedPath {
   closed: boolean;
 }
 
-export function parsePath(d: string): ParsedPath {
+export function parsePath(d: string, idBase?: string): ParsedPath {
   if (!d) return { points: [], closed: false };
   const segs = tokenize(d);
   const points: PathPoint[] = [];
+  // When idBase is provided use deterministic IDs so all callers agree on the same IDs.
+  const nextId = () => idBase ? `${idBase}-${points.length}` : makeId();
   let cx = 0, cy = 0, firstX = 0, firstY = 0;
   let lastCpOutX = 0, lastCpOutY = 0;
   let closed = false;
@@ -67,7 +69,7 @@ export function parsePath(d: string): ParsedPath {
           const x = rel ? cx + args[i] : args[i];
           const y = rel ? cy + args[i + 1] : args[i + 1];
           if (firstPoint) { firstX = x; firstY = y; firstPoint = false; }
-          points.push({ id: makeId(), x, y, cpInX: x, cpInY: y, cpOutX: x, cpOutY: y, type: 'corner' });
+          points.push({ id: nextId(), x, y, cpInX: x, cpInY: y, cpOutX: x, cpOutY: y, type: 'corner' });
           lastCpOutX = x; lastCpOutY = y;
           cx = x; cy = y;
         }
@@ -77,7 +79,7 @@ export function parsePath(d: string): ParsedPath {
         for (let i = 0; i + 1 < args.length; i += 2) {
           const x = rel ? cx + args[i] : args[i];
           const y = rel ? cy + args[i + 1] : args[i + 1];
-          points.push({ id: makeId(), x, y, cpInX: x, cpInY: y, cpOutX: x, cpOutY: y, type: 'corner' });
+          points.push({ id: nextId(), x, y, cpInX: x, cpInY: y, cpOutX: x, cpOutY: y, type: 'corner' });
           lastCpOutX = x; lastCpOutY = y;
           cx = x; cy = y;
         }
@@ -86,7 +88,7 @@ export function parsePath(d: string): ParsedPath {
       case 'H': {
         for (const v of args) {
           const x = rel ? cx + v : v;
-          points.push({ id: makeId(), x, y: cy, cpInX: x, cpInY: cy, cpOutX: x, cpOutY: cy, type: 'corner' });
+          points.push({ id: nextId(), x, y: cy, cpInX: x, cpInY: cy, cpOutX: x, cpOutY: cy, type: 'corner' });
           lastCpOutX = x; lastCpOutY = cy; cx = x;
         }
         break;
@@ -94,7 +96,7 @@ export function parsePath(d: string): ParsedPath {
       case 'V': {
         for (const v of args) {
           const y = rel ? cy + v : v;
-          points.push({ id: makeId(), x: cx, y, cpInX: cx, cpInY: y, cpOutX: cx, cpOutY: y, type: 'corner' });
+          points.push({ id: nextId(), x: cx, y, cpInX: cx, cpInY: y, cpOutX: cx, cpOutY: y, type: 'corner' });
           lastCpOutX = cx; lastCpOutY = y; cy = y;
         }
         break;
@@ -112,7 +114,7 @@ export function parsePath(d: string): ParsedPath {
             prev.cpOutX = cp1x; prev.cpOutY = cp1y;
             prev.type = detectType(prev);
           }
-          points.push({ id: makeId(), x, y, cpInX: cp2x, cpInY: cp2y, cpOutX: x, cpOutY: y, type: 'corner' });
+          points.push({ id: nextId(), x, y, cpInX: cp2x, cpInY: cp2y, cpOutX: x, cpOutY: y, type: 'corner' });
           lastCpOutX = cp2x; lastCpOutY = cp2y;
           cx = x; cy = y;
         }
@@ -131,7 +133,7 @@ export function parsePath(d: string): ParsedPath {
             prev.cpOutX = cp1x; prev.cpOutY = cp1y;
             prev.type = detectType(prev);
           }
-          points.push({ id: makeId(), x, y, cpInX: cp2x, cpInY: cp2y, cpOutX: x, cpOutY: y, type: 'corner' });
+          points.push({ id: nextId(), x, y, cpInX: cp2x, cpInY: cp2y, cpOutX: x, cpOutY: y, type: 'corner' });
           lastCpOutX = cp2x; lastCpOutY = cp2y;
           cx = x; cy = y;
         }
@@ -152,7 +154,7 @@ export function parsePath(d: string): ParsedPath {
             prev.cpOutX = cp1x; prev.cpOutY = cp1y;
             prev.type = detectType(prev);
           }
-          points.push({ id: makeId(), x, y, cpInX: cp2x, cpInY: cp2y, cpOutX: x, cpOutY: y, type: 'corner' });
+          points.push({ id: nextId(), x, y, cpInX: cp2x, cpInY: cp2y, cpOutX: x, cpOutY: y, type: 'corner' });
           lastCpOutX = cp2x; lastCpOutY = cp2y;
           cx = x; cy = y;
         }

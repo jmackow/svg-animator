@@ -11,7 +11,8 @@
       "Bash(npm run *)",
       "Bash(xargs ls *)",
       "Bash(git -C /Users/jaroslawmackow/Documents/Projects/Code/svg-animator status)",
-      "Bash(git -C /Users/jaroslawmackow/Documents/Projects/Code/svg-animator log --oneline -3)"
+      "Bash(git -C /Users/jaroslawmackow/Documents/Projects/Code/svg-animator log --oneline -3)",
+      "Bash(npx tsc *)"
     ]
   }
 }

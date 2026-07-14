@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { AnimatableProperty, EasingConfig, PathPoint } from './types';
 import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting, extractSvgDimensions } from './utils/svgDom';
 import { parseSvgLayers } from './utils/svgParser';
 import { extractProjectMetadata } from './utils/exporter';
@@ -20,8 +21,13 @@ function isInputFocused(): boolean {
   );
 }
 
+type CopiedKf =
+  | { type: 'property'; layerId: string; property: AnimatableProperty; value: number; easing: EasingConfig }
+  | { type: 'path'; layerId: string; points: PathPoint[]; closed: boolean; easing: EasingConfig; movedPointIds: string[] };
+
 function KeyboardShortcuts() {
   const { dispatch, deleteSelectedKeyframes, state } = useApp();
+  const kfClipboardRef = useRef<CopiedKf[]>([]);
 
   // Paste SVG from clipboard (e.g. Figma "Copy as SVG")
   useEffect(() => {
@@ -79,6 +85,51 @@ function KeyboardShortcuts() {
 
       if (isInputFocused()) return;
 
+      if (meta && e.key === 'c') {
+        const copied: CopiedKf[] = [];
+        for (const sel of state.selectedKeyframes) {
+          const layer = state.layers.find(l => l.id === sel.layerId);
+          const kf = layer?.tracks[sel.property]?.find(k => k.id === sel.keyframeId);
+          if (kf) copied.push({ type: 'property', layerId: sel.layerId, property: sel.property, value: kf.value, easing: kf.easing });
+        }
+        for (const kfId of state.selectedPathKfIds) {
+          for (const layer of state.layers) {
+            const kf = layer.pathKeyframes?.find(k => k.id === kfId);
+            if (kf) { copied.push({ type: 'path', layerId: layer.id, points: kf.points, closed: kf.closed, easing: kf.easing, movedPointIds: kf.movedPointIds ?? [] }); break; }
+          }
+        }
+        if (copied.length > 0) { kfClipboardRef.current = copied; e.preventDefault(); }
+        return;
+      }
+
+      if (meta && e.key === 'v') {
+        if (kfClipboardRef.current.length === 0) return;
+        e.preventDefault(); // prevents SVG paste event from also firing
+        const t = state.currentTime;
+        for (const item of kfClipboardRef.current) {
+          if (item.type === 'property') {
+            const layer = state.layers.find(l => l.id === item.layerId);
+            if (!layer) continue;
+            const existing = layer.tracks[item.property]?.find(k => Math.abs(k.time - t) < 0.001);
+            if (existing) {
+              dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId: item.layerId, property: item.property, keyframeId: existing.id, value: item.value, easing: item.easing });
+            } else {
+              dispatch({ type: 'ADD_PROPERTY_KEYFRAME', layerId: item.layerId, property: item.property, keyframe: { id: `kf-${Date.now()}-${Math.random().toString(36).slice(2)}`, time: t, value: item.value, easing: item.easing } });
+            }
+          } else {
+            const layer = state.layers.find(l => l.id === item.layerId);
+            if (!layer) continue;
+            const existing = layer.pathKeyframes?.find(k => Math.abs(k.time - t) < 0.001);
+            if (existing) {
+              dispatch({ type: 'UPDATE_PATH_KEYFRAME', layerId: item.layerId, keyframeId: existing.id, points: item.points, movedPointIds: item.movedPointIds });
+            } else {
+              dispatch({ type: 'ADD_PATH_KEYFRAME', layerId: item.layerId, keyframe: { id: `pkf-${Date.now()}-${Math.random().toString(36).slice(2)}`, time: t, points: item.points, closed: item.closed, easing: item.easing, movedPointIds: item.movedPointIds } });
+            }
+          }
+        }
+        return;
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (state.selectedKeyframes.length > 0 || state.selectedPathKfIds.length > 0) {
           e.preventDefault();
@@ -109,7 +160,7 @@ function KeyboardShortcuts() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dispatch, deleteSelectedKeyframes, state.selectedKeyframes, state.selectedPathKfIds, state.isPlaying, state.svgSource, state.currentTime, state.duration, state.selectedLayerId, state.layers]);
+  }, [dispatch, deleteSelectedKeyframes, state.selectedKeyframes, state.selectedPathKfIds, state.isPlaying, state.svgSource, state.currentTime, state.duration, state.selectedLayerId, state.layers, kfClipboardRef]);
 
   return null;
 }

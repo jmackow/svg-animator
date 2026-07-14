@@ -65,7 +65,7 @@ function LayerRow({
   dragProps: DragProps;
 }) {
   const { state, dispatch } = useApp();
-  const isSelected = state.selectedLayerId === layer.id;
+  const isSelected = state.selectedLayerIds.includes(layer.id);
   const isHovered = state.cmdHoverLayerId === layer.id;
   const isDragging = dragProps.draggingId === layer.id;
   const [editing, setEditing] = useState(false);
@@ -97,7 +97,13 @@ function LayerRow({
       ref={(el) => dragProps.registerRef(layer.id, el)}
       className={`layer-row ${isSelected ? 'layer-row--selected' : ''} ${isHovered ? 'layer-row--hovered' : ''} ${isDragging ? 'layer-row--dragging' : ''}`}
       style={{ paddingLeft: 4 + depth * 14 }}
-      onClick={() => dispatch({ type: 'SELECT_LAYER', layerId: layer.id })}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey) {
+          dispatch({ type: 'ADD_TO_LAYER_SELECTION', layerId: layer.id });
+        } else {
+          dispatch({ type: 'SELECT_LAYER', layerId: layer.id });
+        }
+      }}
     >
       <span
         className="layer-drag-handle"

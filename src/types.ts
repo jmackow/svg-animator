@@ -140,6 +140,7 @@ export interface AppState {
   svgSource: string | null;
   layers: Layer[];
   selectedLayerId: string | null;
+  selectedLayerIds: string[];
   selectedKeyframes: SelectedKeyframe[];
   currentTime: number;
   duration: number;

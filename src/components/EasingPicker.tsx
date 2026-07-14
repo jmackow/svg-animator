@@ -250,6 +250,12 @@ const PRESETS: Array<{ name: EasingPreset; label: string }> = [
 const DEFAULT_BEZIER: BezierEasingConfig = { type: 'bezier', x1: 0.25, y1: 0.1, x2: 0.25, y2: 1.0 };
 const DEFAULT_SPRING: SpringEasingConfig = { type: 'spring', stiffness: 120, damping: 14, mass: 1 };
 
+const SPRING_PRESETS: Array<{ label: string; config: SpringEasingConfig }> = [
+  { label: 'Spring',       config: { type: 'spring', stiffness: 120, damping: 14, mass: 1 } },
+  { label: 'Bouncy',       config: { type: 'spring', stiffness: 300, damping: 10, mass: 1 } },
+  { label: 'Extra Bouncy', config: { type: 'spring', stiffness: 500, damping:  6, mass: 1 } },
+];
+
 // ─── Main EasingPicker ────────────────────────────────────────────────────────
 
 export function EasingPicker({
@@ -278,6 +284,9 @@ export function EasingPicker({
   function isActive(cfg: EasingConfig): boolean {
     if (cfg.type !== easing.type) return false;
     if (cfg.type === 'preset' && easing.type === 'preset') return cfg.name === easing.name;
+    if (cfg.type === 'spring' && easing.type === 'spring') {
+      return cfg.stiffness === easing.stiffness && cfg.damping === easing.damping && cfg.mass === easing.mass;
+    }
     return true;
   }
 
@@ -324,15 +333,18 @@ export function EasingPicker({
             </span>
             <span>Custom Bezier</span>
           </button>
-          <button
-            className={`easing-option ${easing.type === 'spring' ? 'easing-option--active' : ''}`}
-            onClick={() => select(easing.type === 'spring' ? easing : DEFAULT_SPRING)}
-          >
-            <span className="easing-option-curve">
-              <CurvePreview config={easing.type === 'spring' ? easing : DEFAULT_SPRING} width={30} height={18} />
-            </span>
-            <span>Spring</span>
-          </button>
+          {SPRING_PRESETS.map((sp) => (
+            <button
+              key={sp.label}
+              className={`easing-option ${isActive(sp.config) ? 'easing-option--active' : ''}`}
+              onClick={() => select(sp.config)}
+            >
+              <span className="easing-option-curve">
+                <CurvePreview config={sp.config} width={30} height={18} />
+              </span>
+              <span>{sp.label}</span>
+            </button>
+          ))}
         </div>
       )}
 
