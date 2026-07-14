@@ -1095,6 +1095,11 @@ export default function PropertiesPanel() {
             <div className="prop-section-title">Colors</div>
             <ColorRow layerId={layer.id} property="fillColor" />
             <ColorRow layerId={layer.id} property="strokeColor" />
+            <div className="prop-grid-2col" style={{ marginTop: 4 }}>
+              <div style={{ gridColumn: '1/-1' }}>
+                <CompactPropInput layerId={layer.id} property="opacity" label="Opacity" step={0.01} min={0} max={1} />
+              </div>
+            </div>
           </div>
 
           {layer.skeletonMode && (
