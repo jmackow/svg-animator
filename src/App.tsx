@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppProvider, useApp } from './context/AppContext';
-import { AnimatableProperty, EasingConfig, PathPoint } from './types';
-import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting, extractSvgDimensions } from './utils/svgDom';
+import { AppProvider, useApp, emptyTracks } from './context/AppContext';
+import { AnimatableProperty, EasingConfig, Layer, PathPoint } from './types';
+import { removeElementsFromSvg, stripIds, wrapAndAppendSvgAsGroup, extractSvgDimensions } from './utils/svgDom';
 import { parseSvgLayers } from './utils/svgParser';
 import { extractProjectMetadata } from './utils/exporter';
-import { importAnimations, mergeImportedTracks } from './utils/animationImporter';
+import { importAnimations, mergeImportedTracks, stripAnimationMarkup } from './utils/animationImporter';
 import { ThemeProvider } from './context/ThemeContext';
 import Toolbar from './components/Toolbar';
 import LeftPanel from './components/LeftPanel';
@@ -42,7 +42,7 @@ function KeyboardShortcuts() {
       try {
         const saved = extractProjectMetadata(svgText);
         if (saved) {
-          dispatch({ type: 'LOAD_PROJECT', svgSource: svgText, layers: saved.layers, duration: saved.duration, canvasWidth: saved.canvasWidth, canvasHeight: saved.canvasHeight, motionPaths: saved.motionPaths ?? [] });
+          dispatch({ type: 'LOAD_PROJECT', svgSource: stripAnimationMarkup(svgText), layers: saved.layers, duration: saved.duration, canvasWidth: saved.canvasWidth, canvasHeight: saved.canvasHeight, motionPaths: saved.motionPaths ?? [] });
           return;
         }
         if (state.svgSource === null) {
@@ -58,8 +58,15 @@ function KeyboardShortcuts() {
           const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
           const { layerTracks, maxDuration, strippedSource } = importAnimations(newSource, newLayers);
           const finalNewLayers = mergeImportedTracks(newLayers, layerTracks);
-          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, strippedSource);
-          dispatch({ type: 'MERGE_LAYERS', newLayers: finalNewLayers, newSvgSource: mergedSvg });
+          const groupId = `svga-grp-${Date.now()}`;
+          const groupLayer: Layer = {
+            id: groupId, elementId: groupId, tagName: 'g', label: 'Imported SVG',
+            tracks: emptyTracks(), visible: true, locked: false, expanded: false,
+            parentId: undefined, anchorX: 0, anchorY: 0, autoRotate: false,
+          };
+          const wrappedLayers = finalNewLayers.map(l => !l.parentId ? { ...l, parentId: groupId } : l);
+          const mergedSvg = wrapAndAppendSvgAsGroup(state.svgSource, strippedSource, groupId);
+          dispatch({ type: 'MERGE_LAYERS', newLayers: [groupLayer, ...wrappedLayers], newSvgSource: mergedSvg });
           if (maxDuration > state.duration) dispatch({ type: 'SET_DURATION', duration: maxDuration });
         }
       } catch { /* ignore invalid SVG */ }

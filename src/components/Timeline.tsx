@@ -460,13 +460,57 @@ export default function Timeline() {
 
     setMarquee({ startX, startY, currentX: startX, currentY: startY, active: true });
 
+    let mouseX = e.clientX;
+    let mouseY = e.clientY;
+    let scrollSpeed = 0;
+    let rafId: number | null = null;
+
+    const SCROLL_ZONE = 40;
+    const MAX_SPEED = 10;
+
+    function updateMarquee() {
+      const cx = mouseX - rect.left + timeline.scrollLeft;
+      const cy = mouseY - rect.top + timeline.scrollTop;
+      setMarquee({ startX, startY, currentX: cx, currentY: cy, active: true });
+    }
+
+    function scrollTick() {
+      if (scrollSpeed !== 0) {
+        timeline.scrollTop = Math.max(0, timeline.scrollTop + scrollSpeed);
+        updateMarquee();
+        rafId = requestAnimationFrame(scrollTick);
+      } else {
+        rafId = null;
+      }
+    }
+
     function onMove(mv: MouseEvent) {
-      const currentX = mv.clientX - rect.left + timeline.scrollLeft;
-      const currentY = mv.clientY - rect.top + timeline.scrollTop;
-      setMarquee({ startX, startY, currentX, currentY, active: true });
+      mouseX = mv.clientX;
+      mouseY = mv.clientY;
+
+      const relY = mv.clientY - rect.top;
+      const h = rect.height;
+      const clamped = Math.max(0, Math.min(h, relY));
+
+      if (clamped < SCROLL_ZONE) {
+        scrollSpeed = -MAX_SPEED * (1 - clamped / SCROLL_ZONE);
+      } else if (clamped > h - SCROLL_ZONE) {
+        scrollSpeed = MAX_SPEED * ((clamped - (h - SCROLL_ZONE)) / SCROLL_ZONE);
+      } else {
+        scrollSpeed = 0;
+      }
+
+      if (scrollSpeed !== 0 && rafId === null) {
+        rafId = requestAnimationFrame(scrollTick);
+      }
+
+      updateMarquee();
     }
 
     function onUp(mv: MouseEvent) {
+      scrollSpeed = 0;
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+
       const endX = mv.clientX - rect.left + timeline.scrollLeft;
       const endY = mv.clientY - rect.top + timeline.scrollTop;
 

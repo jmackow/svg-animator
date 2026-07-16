@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Eye, EyeSlash, Lock, LockOpen, Trash, Polygon } from '@phosphor-icons/react';
+import { Eye, EyeSlash, Lock, LockOpen, Trash } from '@phosphor-icons/react';
 import { useApp } from '../context/AppContext';
 import { Layer } from '../types';
 import { removeElementsFromSvg, moveElementInSvg } from '../utils/svgDom';
@@ -157,16 +157,6 @@ function LayerRow({
         </span>
       )}
       <div className="layer-actions">
-        <button
-          className={`icon-btn${layer.skeletonMode ? ' layer-skeleton-btn--active' : ''}`}
-          title={layer.skeletonMode ? 'Disable skeleton mode' : 'Enable skeleton mode'}
-          onClick={(e) => {
-            e.stopPropagation();
-            dispatch({ type: 'TOGGLE_LAYER_SKELETON', layerId: layer.id });
-          }}
-        >
-          <Polygon size={13} weight={layer.skeletonMode ? 'fill' : 'regular'} />
-        </button>
         <button
           className="icon-btn"
           title={layer.visible ? 'Hide' : 'Show'}

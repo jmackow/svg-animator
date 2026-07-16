@@ -355,6 +355,7 @@ export default function Canvas() {
         }
       }
     }
+
   }, [state.layers, state.currentTime, state.motionPaths]);
 
   // Re-render SVG when source changes; also read default fill/stroke

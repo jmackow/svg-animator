@@ -461,7 +461,7 @@ function parseCssAnimations(svgSource: string, layers: Layer[]): { layerTracks: 
 
 // ─── SVG source stripping ─────────────────────────────────────────────────────
 
-function stripAnimationMarkup(svgSource: string): string {
+export function stripAnimationMarkup(svgSource: string): string {
   // Parse with DOMParser, remove SMIL elements, strip CSS animation declarations
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgSource, 'image/svg+xml');

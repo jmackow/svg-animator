@@ -1,10 +1,73 @@
-import { Layer, AnimatableProperty, GradientDef, PROPERTY_DEFAULTS, ALL_PROPERTIES, MotionPath } from '../types';
+import { Layer, AnimatableProperty, GradientDef, PROPERTY_DEFAULTS, ALL_PROPERTIES, MotionPath, PathPoint, PathKeyframe } from '../types';
 import { easingToCss } from './easing';
 import { unpackColor } from './interpolate';
-import { buildPath } from './pathPoints';
+import { interpolatePathPoints } from './pathPoints';
 
 function cssId(str: string): string {
   return str.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+// Build a path `d` string using ONLY C commands so all sampled frames share the same
+// command structure — required for SMIL calcMode="linear" to interpolate correctly.
+function buildPathSmil(points: PathPoint[], closed: boolean): string {
+  if (points.length === 0) return '';
+  const f = (n: number) => n.toFixed(3);
+  let d = `M ${f(points[0].x)} ${f(points[0].y)}`;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    d += ` C ${f(prev.cpOutX)} ${f(prev.cpOutY)} ${f(curr.cpInX)} ${f(curr.cpInY)} ${f(curr.x)} ${f(curr.y)}`;
+  }
+  if (closed && points.length > 1) {
+    const last = points[points.length - 1];
+    const first = points[0];
+    d += ` C ${f(last.cpOutX)} ${f(last.cpOutY)} ${f(first.cpInX)} ${f(first.cpInY)} ${f(first.x)} ${f(first.y)} Z`;
+  }
+  return d;
+}
+
+// Append a SMIL <animate> element to `el` for shape/anchor-point animation.
+// Works for both <path> (attributeName="d") and <polygon>/<polyline> (attributeName="points").
+// SMIL has universal SVG browser support (Chrome, Firefox, Safari).
+function appendSmilShapeAnimation(
+  doc: XMLDocument,
+  el: Element,
+  tag: string,
+  keyframes: PathKeyframe[],
+  duration: number,
+  loop: 'none' | 'infinite'
+): void {
+  const sorted = [...keyframes].sort((a, b) => a.time - b.time);
+  if (!sorted.every(kf => kf.points.length === sorted[0].points.length)) return;
+  const closed = sorted[0].closed;
+  const isPoly = tag === 'polygon' || tag === 'polyline';
+
+  // Sample uniformly — interpolatePathPoints applies easing correctly at each t
+  const SAMPLES = Math.max(60, Math.round(duration * 60));
+  const keyTimesArr: string[] = [];
+  const valuesArr: string[] = [];
+
+  for (let i = 0; i <= SAMPLES; i++) {
+    const t = (i / SAMPLES) * duration;
+    const pts = interpolatePathPoints(sorted, t);
+    if (!pts) continue;
+    keyTimesArr.push((t / duration).toFixed(5));
+    if (isPoly) {
+      valuesArr.push(pts.map(p => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join(' '));
+    } else {
+      valuesArr.push(buildPathSmil(pts, closed));
+    }
+  }
+
+  const animEl = doc.createElementNS('http://www.w3.org/2000/svg', 'animate');
+  animEl.setAttribute('attributeName', isPoly ? 'points' : 'd');
+  animEl.setAttribute('dur', `${duration}s`);
+  animEl.setAttribute('calcMode', 'linear');
+  animEl.setAttribute('keyTimes', keyTimesArr.join(';'));
+  animEl.setAttribute('values', valuesArr.join(';'));
+  animEl.setAttribute('fill', loop === 'infinite' ? 'remove' : 'freeze');
+  if (loop === 'infinite') animEl.setAttribute('repeatCount', 'indefinite');
+  el.appendChild(animEl);
 }
 
 function embedGradient(doc: XMLDocument, svgEl: Element, gradId: string, grad: GradientDef): string {
@@ -121,29 +184,10 @@ export function exportAnimatedSvg(
     const hasPathKfs = (layer.pathKeyframes?.length ?? 0) >= 2;
     if (!hasAny && !hasGradient && !hasPathKfs) continue;
 
-    // Shape morph animation via CSS `d` property
+    // Shape / anchor-point animation — SMIL works universally (Chrome, Firefox, Safari)
     if (hasPathKfs) {
-      const sorted = [...layer.pathKeyframes!].sort((a, b) => a.time - b.time);
-      // Validate all keyframes have same point count
-      const valid = sorted.every(kf => kf.points.length === sorted[0].points.length);
-      if (valid) {
-        const animName = `svga_shape_${cssId(layer.elementId)}`;
-        const kfLines = sorted.map((kf, i) => {
-          const pct = ((kf.time / duration) * 100).toFixed(3);
-          const d = buildPath(kf.points, kf.closed);
-          const timingFn = i < sorted.length - 1 ? easingToCss(kf.easing) : null;
-          const timing = timingFn ? `  animation-timing-function: ${timingFn};` : '';
-          return `  ${pct}% { d: path('${d}'); ${timing} }`;
-        });
-        const lastKf = sorted[sorted.length - 1];
-        if ((lastKf.time / duration) < 0.9999) {
-          kfLines.push(`  100.000% { d: path('${buildPath(lastKf.points, lastKf.closed)}'); }`);
-        }
-        cssBlocks.push(`@keyframes ${animName} {\n${kfLines.join('\n')}\n}`);
-        const iterCount = loop === 'infinite' ? 'infinite' : '1';
-        const fillMode = loop === 'infinite' ? 'none' : 'forwards';
-        cssBlocks.push(`#${CSS.escape(layer.elementId)} { animation: ${animName} ${duration}s linear; animation-iteration-count: ${iterCount}; animation-fill-mode: ${fillMode}; }`);
-      }
+      const tag = layer.tagName.toLowerCase();
+      appendSmilShapeAnimation(doc, el, tag, layer.pathKeyframes!, duration, loop);
     }
 
     // Embed static gradient fills/strokes directly on the element

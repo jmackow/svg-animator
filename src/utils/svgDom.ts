@@ -81,6 +81,24 @@ export function extractSvgDimensions(svgSource: string): { width: number; height
   return null;
 }
 
+export function wrapAndAppendSvgAsGroup(
+  existingSvg: string,
+  newSvg: string,
+  groupId: string
+): string {
+  const existingDoc = new DOMParser().parseFromString(existingSvg, 'image/svg+xml');
+  const newDoc = new DOMParser().parseFromString(newSvg, 'image/svg+xml');
+  const root = existingDoc.documentElement;
+  const group = existingDoc.createElementNS('http://www.w3.org/2000/svg', 'g');
+  group.setAttribute('id', groupId);
+  for (const child of Array.from(newDoc.documentElement.children)) {
+    if (SKIP_IMPORT_TAGS.has(child.tagName.toLowerCase())) continue;
+    group.appendChild(existingDoc.importNode(child, true));
+  }
+  root.appendChild(group);
+  return new XMLSerializer().serializeToString(root);
+}
+
 export function collectDescendantLayerIds(layerId: string, layers: Layer[]): string[] {
   const result = [layerId];
   layers.filter(l => l.parentId === layerId).forEach(c => result.push(...collectDescendantLayerIds(c.id, layers)));
