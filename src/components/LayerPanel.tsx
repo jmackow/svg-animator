@@ -96,7 +96,7 @@ function LayerRow({
     <div
       ref={(el) => dragProps.registerRef(layer.id, el)}
       className={`layer-row ${isSelected ? 'layer-row--selected' : ''} ${isHovered ? 'layer-row--hovered' : ''} ${isDragging ? 'layer-row--dragging' : ''}`}
-      style={{ paddingLeft: 4 + depth * 14 }}
+      style={{ paddingLeft: 2 + depth * 8 }}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey) {
           dispatch({ type: 'ADD_TO_LAYER_SELECTION', layerId: layer.id });
@@ -224,7 +224,7 @@ function LayerTree({
         return (
           <React.Fragment key={layer.id}>
             {showIndicatorAbove && (
-              <div className="layer-drop-indicator" style={{ marginLeft: 4 + depth * 14 }} />
+              <div className="layer-drop-indicator" style={{ marginLeft: 2 + depth * 8 }} />
             )}
             <LayerRow
               layer={layer}
@@ -241,7 +241,7 @@ function LayerTree({
               />
             )}
             {showIndicatorBelow && (
-              <div className="layer-drop-indicator" style={{ marginLeft: 4 + depth * 14 }} />
+              <div className="layer-drop-indicator" style={{ marginLeft: 2 + depth * 8 }} />
             )}
           </React.Fragment>
         );
