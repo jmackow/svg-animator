@@ -636,16 +636,18 @@ export default function Timeline() {
       >
         {/* Snap toggle button */}
         <div
+          className="loop-toggle"
           style={{ position: 'absolute', left: 4, top: '50%', transform: 'translateY(-50%)', zIndex: 11 }}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
-            className={`snap-btn ${snapEnabled ? 'snap-btn--active' : ''}`}
+            className={`loop-toggle-btn ${snapEnabled ? 'loop-toggle-btn--active' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               dispatch({ type: 'TOGGLE_SNAP' });
             }}
             title={snapEnabled ? 'Snap on' : 'Snap off'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
             <MagnetStraight size={13} weight="fill" /> Snap
           </button>
