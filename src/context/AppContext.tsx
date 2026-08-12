@@ -115,6 +115,8 @@ export type Action =
   | { type: 'MOVE_PATH_KEYFRAME_SILENT'; layerId: string; keyframeId: string; time: number }
   | { type: 'SELECT_PATH_KEYFRAMES'; kfIds: string[] }
   | { type: 'ADD_TO_PATH_KF_SELECTION'; kfIds: string[] }
+  | { type: 'GROUP_LAYERS'; groupLayer: AppState['layers'][0]; childIds: string[]; newSvgSource: string }
+  | { type: 'UNGROUP_LAYER'; groupId: string; newSvgSource: string }
   | { type: 'MERGE_LAYERS'; newLayers: AppState['layers']; newSvgSource: string }
   | { type: 'DELETE_LAYER'; layerId: string; newSvgSource: string }
   | { type: 'REORDER_LAYER'; layerId: string; beforeId: string | null; newSvgSource: string }
@@ -151,7 +153,27 @@ const UNDOABLE = new Set<Action['type']>([
   'DELETE_LAYER',
   'REORDER_LAYER',
   'SET_LAYER_BASE_VALUE',
+  'GROUP_LAYERS',
+  'UNGROUP_LAYER',
 ]);
+
+// ─── Layer tree helpers ───────────────────────────────────────────────────────
+
+// The layer and everything nested under it, however deep.
+export function collectDescendantIds(layerId: string, layers: AppState['layers']): Set<string> {
+  const out = new Set<string>([layerId]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const l of layers) {
+      if (l.parentId && out.has(l.parentId) && !out.has(l.id)) {
+        out.add(l.id);
+        grew = true;
+      }
+    }
+  }
+  return out;
+}
 
 // ─── Core reducer ─────────────────────────────────────────────────────────────
 
@@ -526,30 +548,108 @@ function coreReducer(state: AppState, action: Action): AppState {
       return { ...state, svgSource: action.newSvgSource, layers: [...state.layers, ...action.newLayers] };
 
     case 'DELETE_LAYER': {
-      const deletedId = action.layerId;
+      // Removing a group's element takes its children out of the document too, so
+      // their layers have to go with it.
+      const deleted = collectDescendantIds(action.layerId, state.layers);
       return {
         ...state,
         svgSource: action.newSvgSource,
-        layers: state.layers.filter(l => l.id !== deletedId),
-        selectedLayerId: state.selectedLayerId === deletedId ? null : state.selectedLayerId,
-        selectedLayerIds: state.selectedLayerIds.filter(id => id !== deletedId),
-        selectedKeyframes: state.selectedKeyframes.filter(kf => kf.layerId !== deletedId),
+        layers: state.layers.filter(l => !deleted.has(l.id)),
+        selectedLayerId: deleted.has(state.selectedLayerId ?? '') ? null : state.selectedLayerId,
+        selectedLayerIds: state.selectedLayerIds.filter(id => !deleted.has(id)),
+        selectedKeyframes: state.selectedKeyframes.filter(kf => !deleted.has(kf.layerId)),
         selectedPathKfIds: [],
       };
     }
 
     case 'REORDER_LAYER': {
-      const moved = state.layers.find(l => l.id === action.layerId);
-      if (!moved) return state;
-      const remaining = state.layers.filter(l => l.id !== action.layerId);
-      const insertIdx = action.beforeId !== null
-        ? remaining.findIndex(l => l.id === action.beforeId)
-        : remaining.length;
-      const idx = insertIdx === -1 ? remaining.length : insertIdx;
+      // A group travels with everything nested inside it.
+      const movingIds = collectDescendantIds(action.layerId, state.layers);
+      const subtree = state.layers.filter(l => movingIds.has(l.id));
+      if (subtree.length === 0) return state;
+      const remaining = state.layers.filter(l => !movingIds.has(l.id));
+
+      let idx: number;
+      if (action.beforeId !== null) {
+        const found = remaining.findIndex(l => l.id === action.beforeId);
+        idx = found === -1 ? remaining.length : found;
+      } else {
+        // Dropping at the top of a level means "after the last sibling and all of
+        // its descendants", not the end of the whole array.
+        const moved = state.layers.find(l => l.id === action.layerId)!;
+        const lastSibling = remaining.reduce(
+          (acc, l, i) => (l.parentId === moved.parentId ? i : acc),
+          -1
+        );
+        if (lastSibling === -1) {
+          idx = remaining.findIndex(l => l.id === moved.parentId);
+          idx = idx === -1 ? remaining.length : idx + 1;
+        } else {
+          const tail = collectDescendantIds(remaining[lastSibling].id, remaining);
+          let end = lastSibling;
+          while (end + 1 < remaining.length && tail.has(remaining[end + 1].id)) end++;
+          idx = end + 1;
+        }
+      }
+
       return {
         ...state,
         svgSource: action.newSvgSource,
-        layers: [...remaining.slice(0, idx), moved, ...remaining.slice(idx)],
+        layers: [...remaining.slice(0, idx), ...subtree, ...remaining.slice(idx)],
+      };
+    }
+
+    case 'GROUP_LAYERS': {
+      const childSet = new Set(action.childIds);
+      const children = state.layers
+        .filter(l => childSet.has(l.id))
+        .map(l => ({ ...l, parentId: action.groupLayer.id }));
+      const remaining = state.layers.filter(l => !childSet.has(l.id));
+      // The group takes the slot of the topmost layer it swallowed, so the whole
+      // set keeps its place in the z-order.
+      const topmostIdx = state.layers.reduce(
+        (acc, l, i) => (childSet.has(l.id) ? i : acc),
+        0
+      );
+      const insertAt = state.layers
+        .slice(0, topmostIdx)
+        .filter(l => !childSet.has(l.id)).length;
+
+      return {
+        ...state,
+        svgSource: action.newSvgSource,
+        layers: [
+          ...remaining.slice(0, insertAt),
+          action.groupLayer,
+          ...children,
+          ...remaining.slice(insertAt),
+        ],
+        selectedLayerId: action.groupLayer.id,
+        selectedLayerIds: [action.groupLayer.id],
+        selectedKeyframes: [],
+        selectedPathKfIds: [],
+        selectedPointId: null,
+      };
+    }
+
+    case 'UNGROUP_LAYER': {
+      const group = state.layers.find(l => l.id === action.groupId);
+      if (!group) return state;
+      const freed = state.layers
+        .filter(l => l.parentId === action.groupId)
+        .map(l => l.id);
+      return {
+        ...state,
+        svgSource: action.newSvgSource,
+        // The group's own animation lived on the <g>; dissolving it drops that.
+        layers: state.layers
+          .filter(l => l.id !== action.groupId)
+          .map(l => (l.parentId === action.groupId ? { ...l, parentId: group.parentId } : l)),
+        selectedLayerId: freed.length ? freed[freed.length - 1] : null,
+        selectedLayerIds: freed,
+        selectedKeyframes: [],
+        selectedPathKfIds: [],
+        selectedPointId: null,
       };
     }
 

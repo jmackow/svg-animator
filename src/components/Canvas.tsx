@@ -423,6 +423,7 @@ export default function Canvas() {
     const svgEl = container.querySelector('svg');
     if (!svgEl) return;
 
+    // The innermost layer under the cursor, ignoring grouping.
     function findLayer(target: Element | null) {
       let el: Element | null = target;
       while (el && el !== svgEl) {
@@ -435,11 +436,26 @@ export default function Canvas() {
       return null;
     }
 
+    // Clicking a shape picks the outermost group holding it, so a group reads as
+    // one object. Double-click reaches past that to the shape itself.
+    function findSelectableLayer(target: Element | null) {
+      const layer = findLayer(target);
+      if (!layer) return null;
+      let outermost = layer;
+      let guard = 0;
+      while (outermost.parentId && guard++ < 50) {
+        const parent = layersRef.current.find(l => l.id === outermost.parentId);
+        if (!parent) break;
+        outermost = parent;
+      }
+      return outermost;
+    }
+
     function handleClick(e: MouseEvent) {
       const target = e.target as Element;
       dispatch({ type: 'SET_SELECTED_MOTION_PATH', id: null });
       if (e.metaKey || e.ctrlKey) {
-        const layer = findLayer(target);
+        const layer = findSelectableLayer(target);
         if (layer) {
           dispatch({ type: 'ADD_TO_LAYER_SELECTION', layerId: layer.id });
         } else {
@@ -447,7 +463,7 @@ export default function Canvas() {
         }
         return;
       }
-      const clickedLayer = findLayer(target);
+      const clickedLayer = findSelectableLayer(target);
       if (!clickedLayer) {
         // Clicking SVG background — if a path-like layer is currently selected (anchor edit mode),
         // just clear the selected point rather than deselecting the whole layer.
@@ -483,6 +499,12 @@ export default function Canvas() {
       }
     }
 
+    // Reach inside a group to the individual shape.
+    function handleDblClick(e: MouseEvent) {
+      const layer = findLayer(e.target as Element);
+      if (layer) dispatch({ type: 'SELECT_LAYER', layerId: layer.id });
+    }
+
     function handleKeyUp(e: KeyboardEvent) {
       if ((e.key === 'Meta' || e.key === 'Control') && cmdHoverLayerIdLocalRef.current !== null) {
         cmdHoverLayerIdLocalRef.current = null;
@@ -491,12 +513,14 @@ export default function Canvas() {
     }
 
     svgEl.addEventListener('click', handleClick);
+    svgEl.addEventListener('dblclick', handleDblClick);
     svgEl.addEventListener('mousemove', handleMouseMove);
     svgEl.addEventListener('mouseleave', handleMouseLeave);
     window.addEventListener('keyup', handleKeyUp);
 
     return () => {
       svgEl.removeEventListener('click', handleClick);
+      svgEl.removeEventListener('dblclick', handleDblClick);
       svgEl.removeEventListener('mousemove', handleMouseMove);
       svgEl.removeEventListener('mouseleave', handleMouseLeave);
       window.removeEventListener('keyup', handleKeyUp);
@@ -541,6 +565,9 @@ export default function Canvas() {
     function hitLayerIds(r: ReturnType<typeof rectFrom>): string[] {
       const hits: string[] = [];
       for (const layer of layersRef.current) {
+        // Only outermost layers — a group is picked as a whole, never alongside
+        // the children it contains.
+        if (layer.parentId) continue;
         if (!layer.visible || layer.locked) continue;
         const node = svgEl!.getElementById(layer.elementId) as SVGGraphicsElement | null;
         if (!node) continue;

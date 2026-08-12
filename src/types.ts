@@ -113,6 +113,9 @@ export interface Layer {
   visible: boolean;
   locked: boolean;
   expanded: boolean;
+  // Set on layers nested inside a user-created group (Cmd+G). Import structure is
+  // still flattened away — only explicit groups nest.
+  parentId?: string;
   anchorX: number;    // px from center, default 0
   anchorY: number;    // px from center, default 0
   motionPathId?: string;   // assigned MotionPath id

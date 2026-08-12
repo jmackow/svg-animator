@@ -1,4 +1,5 @@
 import { Layer, PropertyTracks, ALL_PROPERTIES } from '../types';
+import { USER_GROUP_ATTR } from './svgDom';
 
 const SKIP_TAGS = new Set([
   'defs', 'title', 'desc', 'style', 'script', 'filter',
@@ -53,6 +54,8 @@ function emptyTracks(): PropertyTracks {
 //  - a per-child attribute can't be merged onto a child that already sets its own
 // Groups kept for these reasons are still never layers — only shapes are.
 function canDissolve(g: Element): boolean {
+  // A group the user made with Cmd+G is a layer in its own right — never dissolve it.
+  if (g.hasAttribute(USER_GROUP_ATTR)) return false;
   if (g.hasAttribute('transform') || g.hasAttribute('opacity')) return false;
   const conflicting = PER_CHILD_ATTRS.filter(a => g.hasAttribute(a));
   return Array.from(g.children).every(c => conflicting.every(a => !c.hasAttribute(a)));
@@ -101,33 +104,48 @@ function flattenGroups(parent: Element): boolean {
 // shapes inside them are. Elements are given ids here if they lack one, and any
 // element repeating an id already claimed is re-issued a fresh one so every layer
 // maps to exactly one element.
-function shapeElements(svgEl: Element): { list: Array<{ el: Element; id: string }>; changed: boolean } {
+function shapeElements(svgEl: Element): {
+  list: Array<{ el: Element; id: string; parentId?: string }>;
+  changed: boolean;
+} {
   const taken = new Set<string>();
   for (const el of Array.from(svgEl.ownerDocument!.querySelectorAll('[id]'))) {
     taken.add(el.getAttribute('id')!);
   }
   const seen = new Set<string>();
-  const list: Array<{ el: Element; id: string }> = [];
+  const list: Array<{ el: Element; id: string; parentId?: string }> = [];
   let changed = false;
 
-  function walk(parent: Element) {
+  function claimId(el: Element): string {
+    let id = el.getAttribute('id');
+    if (!id || seen.has(id)) {
+      id = makeId(taken);
+      el.setAttribute('id', id);
+      changed = true;
+    }
+    seen.add(id);
+    return id;
+  }
+
+  function walk(parent: Element, parentId?: string) {
     for (const child of Array.from(parent.children)) {
       const tag = child.tagName.toLowerCase();
       if (SKIP_TAGS.has(tag)) continue;
 
       if (tag === 'g' || tag === 'svg') {
-        walk(child);
+        // A user group is itself a layer, and its contents nest beneath it.
+        // Anything else is a leftover wrapper: descend without listing it.
+        if (child.hasAttribute(USER_GROUP_ATTR)) {
+          const id = claimId(child);
+          list.push({ el: child, id, parentId });
+          walk(child, id);
+        } else {
+          walk(child, parentId);
+        }
         continue;
       }
 
-      let id = child.getAttribute('id');
-      if (!id || seen.has(id)) {
-        id = makeId(taken);
-        child.setAttribute('id', id);
-        changed = true;
-      }
-      seen.add(id);
-      list.push({ el: child, id });
+      list.push({ el: child, id: claimId(child), parentId });
     }
   }
 
@@ -135,16 +153,18 @@ function shapeElements(svgEl: Element): { list: Array<{ el: Element; id: string 
   return { list, changed };
 }
 
-function newLayer(el: Element, id: string, index: number): Layer {
+function newLayer(el: Element, id: string, index: number, parentId?: string): Layer {
+  const isGroup = el.hasAttribute(USER_GROUP_ATTR);
   return {
     id,
     elementId: id,
     tagName: el.tagName,
-    label: getLabel(el, index),
+    label: isGroup ? 'Group' : getLabel(el, index),
     tracks: emptyTracks(),
     visible: true,
     locked: false,
-    expanded: false,
+    expanded: isGroup,
+    parentId,
     anchorX: 0,
     anchorY: 0,
     autoRotate: false,
@@ -162,7 +182,7 @@ export function parseSvgLayers(svgSource: string): { layers: Layer[]; source: st
   const flattened = flattenGroups(svgEl);
   const { list, changed } = shapeElements(svgEl);
 
-  const layers = list.map(({ el, id }, i) => newLayer(el, id, i));
+  const layers = list.map(({ el, id, parentId }, i) => newLayer(el, id, i, parentId));
 
   const serializer = new XMLSerializer();
   const finalSource = flattened || changed ? serializer.serializeToString(doc) : svgSource;
@@ -170,10 +190,11 @@ export function parseSvgLayers(svgSource: string): { layers: Layer[]; source: st
   return { layers, source: finalSource };
 }
 
-// Projects saved before layers went flat carry group layers in their metadata —
-// restoring those verbatim puts groups back in the panel, where deleting one takes
-// its whole subtree with it. Rebuild the list from the flattened document instead,
-// carrying each shape's saved animation data across by element id.
+// Projects saved before layers went flat carry import-structure groups in their
+// metadata — restoring those verbatim puts them back in the panel, where deleting
+// one takes its whole subtree with it. Rebuild the list from the flattened
+// document instead, carrying each layer's saved animation data across by element
+// id. Groups the user made with Cmd+G survive, since flattening leaves them be.
 export function flattenProjectLayers(
   svgSource: string,
   savedLayers: Layer[]
@@ -187,13 +208,12 @@ export function flattenProjectLayers(
   const { list, changed } = shapeElements(svgEl);
 
   const savedByElement = new Map(savedLayers.map(l => [l.elementId, l]));
-  const layers = list.map(({ el, id }, i) => {
+  const layers = list.map(({ el, id, parentId }, i) => {
     const saved = savedByElement.get(id);
-    if (!saved) return newLayer(el, id, i);
-    // Keep everything the user authored; drop the hierarchy field and trust the
-    // document for the tag, since a dissolved wrapper may have changed it.
-    const { parentId: _drop, ...rest } = saved as Layer & { parentId?: string };
-    return { ...rest, id, elementId: id, tagName: el.tagName } as Layer;
+    if (!saved) return newLayer(el, id, i, parentId);
+    // Keep everything the user authored, but take the hierarchy and tag from the
+    // document — a dissolved wrapper may have changed both.
+    return { ...saved, id, elementId: id, tagName: el.tagName, parentId };
   });
 
   const serializer = new XMLSerializer();

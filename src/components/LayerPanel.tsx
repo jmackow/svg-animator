@@ -6,13 +6,14 @@ import { removeElementsFromSvg, moveElementInSvg } from '../utils/svgDom';
 
 interface DragState {
   draggingId: string;
+  parentId: string | undefined;
   currentBeforeId: string | null;
 }
 
 interface DragProps {
   draggingId: string | null;
-  dropIndicator: { beforeId: string | null } | null;
-  onDragStart: (id: string) => void;
+  dropIndicator: { parentId: string | undefined; beforeId: string | null } | null;
+  onDragStart: (id: string, parentId: string | undefined) => void;
   registerRef: (id: string, el: HTMLDivElement | null) => void;
   onSelect: (id: string, e: React.MouseEvent) => void;
 }
@@ -55,9 +56,13 @@ function LayerPreview({ elementId }: { elementId: string }) {
 
 function LayerRow({
   layer,
+  depth,
+  hasChildren,
   dragProps,
 }: {
   layer: Layer;
+  depth: number;
+  hasChildren: boolean;
   dragProps: DragProps;
 }) {
   const { state, dispatch } = useApp();
@@ -92,7 +97,7 @@ function LayerRow({
     <div
       ref={(el) => dragProps.registerRef(layer.id, el)}
       className={`layer-row ${isSelected ? 'layer-row--selected' : ''} ${isHovered ? 'layer-row--hovered' : ''} ${isDragging ? 'layer-row--dragging' : ''}`}
-      style={{ paddingLeft: 4 }}
+      style={{ paddingLeft: 4 + depth * 14 }}
       onClick={(e) => dragProps.onSelect(layer.id, e)}
     >
       <span
@@ -101,11 +106,26 @@ function LayerRow({
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          dragProps.onDragStart(layer.id);
+          dragProps.onDragStart(layer.id, layer.parentId);
         }}
       >
         ≡
       </span>
+      {hasChildren ? (
+        <button
+          className="icon-btn expand-btn"
+          style={{ marginRight: 2 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            dispatch({ type: 'TOGGLE_LAYER_EXPANDED', layerId: layer.id });
+          }}
+          title={layer.expanded ? 'Collapse' : 'Expand'}
+        >
+          {layer.expanded ? '▾' : '▸'}
+        </button>
+      ) : (
+        <span style={{ width: 12, display: 'inline-block', flexShrink: 0 }} />
+      )}
       <LayerPreview elementId={layer.elementId} />
       <span className="layer-tag">{layer.tagName}</span>
       {editing ? (
@@ -168,24 +188,62 @@ function LayerRow({
   );
 }
 
-function LayerList({ layers, dragProps }: { layers: Layer[]; dragProps: DragProps }) {
+// Ids of the rows actually on screen, top to bottom — the order shift-range
+// selection walks. Collapsed subtrees are skipped, matching what LayerTree draws.
+function visibleRowOrder(layers: Layer[]): string[] {
+  const out: string[] = [];
+  function walk(parentId: string | undefined) {
+    for (const layer of layers.filter(l => l.parentId === parentId).reverse()) {
+      out.push(layer.id);
+      if (layer.expanded && layers.some(l => l.parentId === layer.id)) walk(layer.id);
+    }
+  }
+  walk(undefined);
+  return out;
+}
+
+function LayerTree({
+  layers,
+  parentId,
+  depth,
+  dragProps,
+}: {
+  layers: Layer[];
+  parentId: string | undefined;
+  depth: number;
+  dragProps: DragProps;
+}) {
   // Reversed so the highest z-order layer appears at the top of the list
-  const ordered = [...layers].reverse();
+  const siblings = layers.filter(l => l.parentId === parentId).reverse();
+  if (siblings.length === 0) return null;
 
   return (
     <>
-      {ordered.map((layer, idx) => {
+      {siblings.map((layer, idx) => {
+        const children = layers.filter(l => l.parentId === layer.id);
         const di = dragProps.dropIndicator;
         // beforeId=null means append to end of data = highest z-order = visual top
-        const showIndicatorAbove = idx === 0 && !!di && di.beforeId === null;
+        const showIndicatorAbove = idx === 0 && !!di && di.parentId === parentId && di.beforeId === null;
         // beforeId=layer.id means insert before this layer in data = lower z-order = below in visual
-        const showIndicatorBelow = !!di && di.beforeId === layer.id;
+        const showIndicatorBelow = !!di && di.parentId === parentId && di.beforeId === layer.id;
 
         return (
           <React.Fragment key={layer.id}>
-            {showIndicatorAbove && <div className="layer-drop-indicator" style={{ marginLeft: 4 }} />}
-            <LayerRow layer={layer} dragProps={dragProps} />
-            {showIndicatorBelow && <div className="layer-drop-indicator" style={{ marginLeft: 4 }} />}
+            {showIndicatorAbove && (
+              <div className="layer-drop-indicator" style={{ marginLeft: 4 + depth * 14 }} />
+            )}
+            <LayerRow
+              layer={layer}
+              depth={depth}
+              hasChildren={children.length > 0}
+              dragProps={dragProps}
+            />
+            {children.length > 0 && layer.expanded && (
+              <LayerTree layers={layers} parentId={layer.id} depth={depth + 1} dragProps={dragProps} />
+            )}
+            {showIndicatorBelow && (
+              <div className="layer-drop-indicator" style={{ marginLeft: 4 + depth * 14 }} />
+            )}
           </React.Fragment>
         );
       })}
@@ -202,7 +260,7 @@ export default function LayerPanel() {
   const svgSourceRef = useRef(state.svgSource);
   const selectionAnchorRef = useRef<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropIndicator, setDropIndicator] = useState<{ beforeId: string | null } | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<{ parentId: string | undefined; beforeId: string | null } | null>(null);
 
   useEffect(() => {
     layersRef.current = state.layers;
@@ -214,16 +272,17 @@ export default function LayerPanel() {
     else rowRefs.current.delete(id);
   }
 
-  function startDrag(id: string) {
-    dragRef.current = { draggingId: id, currentBeforeId: null };
+  function startDrag(id: string, parentId: string | undefined) {
+    dragRef.current = { draggingId: id, parentId, currentBeforeId: null };
     setDraggingId(id);
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'grabbing';
   }
 
   useEffect(() => {
-    function computeBeforeId(mouseY: number, draggingId: string): string | null {
-      const siblings = layersRef.current.filter(l => l.id !== draggingId);
+    function computeBeforeId(mouseY: number, draggingId: string, parentId: string | undefined): string | null {
+      // Reorder stays within one level — a row can only be dropped among its siblings.
+      const siblings = layersRef.current.filter(l => l.parentId === parentId && l.id !== draggingId);
       // Display is reversed (high data index = visual top). Iterate from high→low index.
       // Return the last sibling (lowest data index) whose midpoint the mouse is below —
       // that sibling is visually above the cursor, so drop goes just below it in visual = before it in data.
@@ -241,9 +300,9 @@ export default function LayerPanel() {
     function onMove(e: MouseEvent) {
       const drag = dragRef.current;
       if (!drag) return;
-      const beforeId = computeBeforeId(e.clientY, drag.draggingId);
+      const beforeId = computeBeforeId(e.clientY, drag.draggingId, drag.parentId);
       drag.currentBeforeId = beforeId;
-      setDropIndicator({ beforeId });
+      setDropIndicator({ parentId: drag.parentId, beforeId });
     }
 
     function onUp(e: MouseEvent) {
@@ -262,21 +321,25 @@ export default function LayerPanel() {
       const movedLayer = layers.find(l => l.id === drag.draggingId);
       if (!movedLayer) return;
 
-      const beforeId = computeBeforeId(e.clientY, drag.draggingId);
+      const beforeId = computeBeforeId(e.clientY, drag.draggingId, drag.parentId);
 
       // Check if position actually changed
-      const currIdx = layers.findIndex(l => l.id === drag.draggingId);
+      const siblings = layers.filter(l => l.parentId === drag.parentId);
+      const currIdx = siblings.findIndex(l => l.id === drag.draggingId);
       const targetIdx = beforeId !== null
-        ? layers.findIndex(l => l.id === beforeId)
-        : layers.length;
+        ? siblings.findIndex(l => l.id === beforeId)
+        : siblings.length;
       const adjustedTarget = currIdx < targetIdx ? targetIdx - 1 : targetIdx;
       if (currIdx === adjustedTarget) return;
 
+      const parentElementId = movedLayer.parentId
+        ? layers.find(l => l.id === movedLayer.parentId)?.elementId ?? null
+        : null;
       const beforeElementId = beforeId
         ? layers.find(l => l.id === beforeId)?.elementId ?? null
         : null;
 
-      const newSvgSource = moveElementInSvg(svgSource, movedLayer.elementId, beforeElementId);
+      const newSvgSource = moveElementInSvg(svgSource, movedLayer.elementId, beforeElementId, parentElementId);
       dispatch({ type: 'REORDER_LAYER', layerId: drag.draggingId, beforeId, newSvgSource });
     }
 
@@ -298,7 +361,7 @@ export default function LayerPanel() {
     }
 
     if (e.shiftKey && selectionAnchorRef.current) {
-      const ordered = [...state.layers].reverse().map(l => l.id);
+      const ordered = visibleRowOrder(state.layers);
       const from = ordered.indexOf(selectionAnchorRef.current);
       const to = ordered.indexOf(id);
       if (from !== -1 && to !== -1) {
@@ -332,7 +395,7 @@ export default function LayerPanel() {
         <div className="panel-empty">Import an SVG to see layers</div>
       ) : (
         <div className="layer-list">
-          <LayerList layers={state.layers} dragProps={dragProps} />
+          <LayerTree layers={state.layers} parentId={undefined} depth={0} dragProps={dragProps} />
         </div>
       )}
     </div>

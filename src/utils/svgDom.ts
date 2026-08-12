@@ -42,19 +42,64 @@ export function removeElementsFromSvg(svgSource: string, elementIds: string[]): 
   return new XMLSerializer().serializeToString(doc.documentElement);
 }
 
-// Layers are a flat list, so a move is always "put this element directly before
-// the target" — the target's own parent decides where it lands.
+// Moves an element to sit directly before the target. With no target it goes to
+// the end of `parentElementId` (or the root), which is the top of the z-order.
 export function moveElementInSvg(
   svgSource: string,
   elementId: string,
-  beforeElementId: string | null
+  beforeElementId: string | null,
+  parentElementId?: string | null
 ): string {
   const doc = new DOMParser().parseFromString(svgSource, 'image/svg+xml');
   const el = doc.getElementById(elementId);
   if (!el) return svgSource;
   const ref = beforeElementId ? doc.getElementById(beforeElementId) : null;
-  if (ref && ref.parentNode) ref.parentNode.insertBefore(el, ref);
-  else doc.documentElement.appendChild(el);
+  if (ref && ref.parentNode) {
+    ref.parentNode.insertBefore(el, ref);
+  } else {
+    const container = parentElementId ? doc.getElementById(parentElementId) : doc.documentElement;
+    (container ?? doc.documentElement).appendChild(el);
+  }
+  return new XMLSerializer().serializeToString(doc.documentElement);
+}
+
+// Marks a <g> as user-created (Cmd+G) rather than leftover import structure, so
+// the flattening pass knows to leave it alone and keep it as a real layer.
+export const USER_GROUP_ATTR = 'data-svga-group';
+
+// Wraps the given elements in a new <g>, placed where the topmost of them sat so
+// the group keeps their z-order. Relative order among them is preserved.
+export function groupElementsInSvg(
+  svgSource: string,
+  elementIds: string[],
+  groupId: string
+): string {
+  const doc = new DOMParser().parseFromString(svgSource, 'image/svg+xml');
+  const root = doc.documentElement;
+  const wanted = new Set(elementIds);
+  // querySelectorAll yields document order, which is z-order for SVG.
+  const targets = Array.from(root.querySelectorAll('[id]')).filter(el =>
+    wanted.has(el.getAttribute('id')!)
+  );
+  if (targets.length === 0) return svgSource;
+
+  const topmost = targets[targets.length - 1];
+  const group = doc.createElementNS('http://www.w3.org/2000/svg', 'g');
+  group.setAttribute('id', groupId);
+  group.setAttribute(USER_GROUP_ATTR, '1');
+  topmost.parentNode!.insertBefore(group, topmost.nextSibling);
+  for (const el of targets) group.appendChild(el);
+
+  return new XMLSerializer().serializeToString(root);
+}
+
+// Dissolves a user group, leaving its children in place at the group's position.
+export function ungroupElementInSvg(svgSource: string, groupId: string): string {
+  const doc = new DOMParser().parseFromString(svgSource, 'image/svg+xml');
+  const group = doc.getElementById(groupId);
+  if (!group?.parentNode) return svgSource;
+  while (group.firstChild) group.parentNode.insertBefore(group.firstChild, group);
+  group.parentNode.removeChild(group);
   return new XMLSerializer().serializeToString(doc.documentElement);
 }
 

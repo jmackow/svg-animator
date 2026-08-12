@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppProvider, useApp } from './context/AppContext';
-import { AnimatableProperty, EasingConfig, PathPoint } from './types';
-import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting, extractSvgDimensions } from './utils/svgDom';
+import { AppProvider, useApp, emptyTracks } from './context/AppContext';
+import { AnimatableProperty, EasingConfig, PathPoint, ALL_PROPERTIES } from './types';
+import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting, extractSvgDimensions, groupElementsInSvg, ungroupElementInSvg } from './utils/svgDom';
 import { parseSvgLayers, flattenProjectLayers } from './utils/svgParser';
 import { extractProjectMetadata } from './utils/exporter';
 import { importAnimations, mergeImportedTracks, stripAnimationMarkup } from './utils/animationImporter';
@@ -85,6 +85,76 @@ function KeyboardShortcuts() {
       }
 
       if (isInputFocused()) return;
+
+      // Cmd/Ctrl+A with the timeline in play selects every keyframe there —
+      // property tracks and anchor-point (path) tracks alike.
+      if (meta && (e.key === 'a' || e.key === 'A')) {
+        const timelineActive =
+          state.selectedKeyframes.length > 0 || state.selectedPathKfIds.length > 0;
+        if (!timelineActive) return;
+        e.preventDefault();
+
+        const allKfs: { layerId: string; property: AnimatableProperty; keyframeId: string }[] = [];
+        const allPathKfIds: string[] = [];
+        for (const layer of state.layers) {
+          for (const property of ALL_PROPERTIES) {
+            for (const kf of layer.tracks[property]) {
+              allKfs.push({ layerId: layer.id, property, keyframeId: kf.id });
+            }
+          }
+          for (const kf of layer.pathKeyframes ?? []) allPathKfIds.push(kf.id);
+        }
+        dispatch({ type: 'SELECT_KEYFRAMES', kfs: allKfs });
+        dispatch({ type: 'SELECT_PATH_KEYFRAMES', kfIds: allPathKfIds });
+        return;
+      }
+
+      // Cmd/Ctrl+G groups the selection; Cmd/Ctrl+Shift+G dissolves a group.
+      if (meta && (e.key === 'g' || e.key === 'G')) {
+        e.preventDefault();
+        if (!state.svgSource) return;
+
+        if (e.shiftKey) {
+          const group = state.layers.find(
+            l => state.selectedLayerIds.includes(l.id) && l.tagName.toLowerCase() === 'g'
+          );
+          if (!group) return;
+          dispatch({
+            type: 'UNGROUP_LAYER',
+            groupId: group.id,
+            newSvgSource: ungroupElementInSvg(state.svgSource, group.elementId),
+          });
+          return;
+        }
+
+        if (state.selectedLayerIds.length < 2) return;
+        // Only group siblings — mixing levels would have to reparent across groups.
+        const picked = state.layers.filter(l => state.selectedLayerIds.includes(l.id));
+        const parentId = picked[0].parentId;
+        if (picked.some(l => l.parentId !== parentId)) return;
+
+        const groupId = `svga-group-${Date.now().toString(36)}`;
+        dispatch({
+          type: 'GROUP_LAYERS',
+          groupLayer: {
+            id: groupId,
+            elementId: groupId,
+            tagName: 'g',
+            label: 'Group',
+            tracks: emptyTracks(),
+            visible: true,
+            locked: false,
+            expanded: true,
+            parentId,
+            anchorX: 0,
+            anchorY: 0,
+            autoRotate: false,
+          },
+          childIds: picked.map(l => l.id),
+          newSvgSource: groupElementsInSvg(state.svgSource, picked.map(l => l.elementId), groupId),
+        });
+        return;
+      }
 
       if (meta && e.key === 'c') {
         const copied: CopiedKf[] = [];
