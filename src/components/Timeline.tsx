@@ -830,8 +830,8 @@ export default function Timeline() {
     );
   }
 
-  // ── Collect all descendant KF times (for parent header ghost diamonds) ────
-  function collectDescendantKfTimesMs(layerId: string): Set<number> {
+  // ── Collect a layer's own KF times (ghost diamonds on the collapsed header) ──
+  function collectLayerKfTimesMs(layerId: string): Set<number> {
     const times = new Set<number>();
     const layer = layers.find(l => l.id === layerId);
     if (!layer) return times;
@@ -839,34 +839,15 @@ export default function Timeline() {
       for (const kf of layer.tracks[prop]) times.add(Math.round(kf.time * 1000));
     }
     for (const kf of layer.pathKeyframes ?? []) times.add(Math.round(kf.time * 1000));
-    for (const child of layers.filter(l => l.parentId === layerId)) {
-      for (const t of collectDescendantKfTimesMs(child.id)) times.add(t);
-    }
     return times;
   }
 
-  // ── Visible layers for timeline ───────────────────────────────────────────
-  // A layer is "animated" if it has ≥1 keyframe, or is a group with animated descendants
-  function hasAnimatedContent(layerId: string): boolean {
-    const layer = layers.find((l) => l.id === layerId);
-    if (!layer) return false;
-    if (ALL_PROPERTIES.some((p) => layer.tracks[p].length >= 1)) return true;
-    if ((layer.pathKeyframes?.length ?? 0) >= 1) return true;
-    return layers.some((l) => l.parentId === layerId && hasAnimatedContent(l.id));
-  }
-
-  // Layers to show in timeline: animated, and all ancestors are expanded
-  const visibleTimelineLayers = layers.filter((layer) => {
-    if (!hasAnimatedContent(layer.id)) return false;
-    let pid = layer.parentId;
-    while (pid) {
-      const parent = layers.find((l) => l.id === pid);
-      if (!parent) break;
-      if (!parent.expanded) return false;
-      pid = parent.parentId;
-    }
-    return true;
-  });
+  // ── Visible layers for timeline: those with at least one keyframe ─────────
+  const visibleTimelineLayers = layers.filter(
+    (layer) =>
+      ALL_PROPERTIES.some((p) => layer.tracks[p].length >= 1) ||
+      (layer.pathKeyframes?.length ?? 0) >= 1
+  );
 
   const totalWidth = LEFT_GUTTER + duration * zoom + 40;
   const playheadX = LEFT_GUTTER + currentTime * zoom;
@@ -921,17 +902,6 @@ export default function Timeline() {
           visibleTimelineLayers.map((layer) => {
             const isSelectedLayer = state.selectedLayerId === layer.id;
             const hasAnyKf = ALL_PROPERTIES.some((p) => layer.tracks[p].length > 0);
-            const isGroup = layer.tagName.toLowerCase() === 'g';
-            const hasChildren = layers.some((l) => l.parentId === layer.id);
-            // Depth for indentation
-            let depth = 0;
-            let pid = layer.parentId;
-            while (pid) {
-              const parent = layers.find((l) => l.id === pid);
-              if (!parent) break;
-              depth++;
-              pid = parent.parentId;
-            }
 
             return (
               <React.Fragment key={layer.id}>
@@ -941,36 +911,23 @@ export default function Timeline() {
                   style={{ height: LAYER_HEADER_HEIGHT }}
                   onClick={() => dispatch({ type: 'SELECT_LAYER', layerId: layer.id })}
                 >
-                  <div className="track-label" style={{ width: LEFT_GUTTER, paddingLeft: 4 + depth * 10 }}>
-                    {isGroup && hasChildren ? (
-                      <button
-                        className="icon-btn expand-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dispatch({ type: 'TOGGLE_LAYER_EXPANDED', layerId: layer.id });
-                        }}
-                        title={layer.expanded ? 'Collapse' : 'Expand'}
-                      >
-                        {layer.expanded ? '▾' : '▸'}
-                      </button>
-                    ) : (
-                      <button
-                        className="icon-btn expand-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dispatch({ type: 'TOGGLE_LAYER_EXPANDED', layerId: layer.id });
-                        }}
-                        title={layer.expanded ? 'Collapse' : 'Expand'}
-                      >
-                        {layer.expanded ? '▾' : '▸'}
-                      </button>
-                    )}
+                  <div className="track-label" style={{ width: LEFT_GUTTER, paddingLeft: 4 }}>
+                    <button
+                      className="icon-btn expand-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dispatch({ type: 'TOGGLE_LAYER_EXPANDED', layerId: layer.id });
+                      }}
+                      title={layer.expanded ? 'Collapse' : 'Expand'}
+                    >
+                      {layer.expanded ? '▾' : '▸'}
+                    </button>
                     <span className="layer-tag" style={{ fontSize: 9 }}>{layer.tagName}</span>
                     <span className="track-name">{layer.label}</span>
                     {hasAnyKf && <span className="track-kf-dot" title="Has keyframes" />}
                   </div>
                   <div className="track-area track-area--header" style={{ position: 'relative' }}>
-                    {Array.from(collectDescendantKfTimesMs(layer.id)).map(ms => (
+                    {Array.from(collectLayerKfTimesMs(layer.id)).map(ms => (
                       <div
                         key={ms}
                         className="keyframe-diamond keyframe-diamond--ghost"

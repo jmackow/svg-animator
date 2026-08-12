@@ -1,5 +1,3 @@
-import { Layer } from '../types';
-
 const SKIP_IMPORT_TAGS = new Set(['defs', 'style', 'title', 'desc', 'metadata', 'script']);
 
 export function stripIds(svgText: string): string {
@@ -44,19 +42,19 @@ export function removeElementsFromSvg(svgSource: string, elementIds: string[]): 
   return new XMLSerializer().serializeToString(doc.documentElement);
 }
 
+// Layers are a flat list, so a move is always "put this element directly before
+// the target" — the target's own parent decides where it lands.
 export function moveElementInSvg(
   svgSource: string,
   elementId: string,
-  beforeElementId: string | null,
-  parentElementId: string | null
+  beforeElementId: string | null
 ): string {
   const doc = new DOMParser().parseFromString(svgSource, 'image/svg+xml');
-  const container = parentElementId ? doc.getElementById(parentElementId) : doc.documentElement;
   const el = doc.getElementById(elementId);
-  if (!el || !container) return svgSource;
+  if (!el) return svgSource;
   const ref = beforeElementId ? doc.getElementById(beforeElementId) : null;
-  if (ref) container.insertBefore(el, ref);
-  else container.appendChild(el);
+  if (ref && ref.parentNode) ref.parentNode.insertBefore(el, ref);
+  else doc.documentElement.appendChild(el);
   return new XMLSerializer().serializeToString(doc.documentElement);
 }
 
@@ -81,26 +79,3 @@ export function extractSvgDimensions(svgSource: string): { width: number; height
   return null;
 }
 
-export function wrapAndAppendSvgAsGroup(
-  existingSvg: string,
-  newSvg: string,
-  groupId: string
-): string {
-  const existingDoc = new DOMParser().parseFromString(existingSvg, 'image/svg+xml');
-  const newDoc = new DOMParser().parseFromString(newSvg, 'image/svg+xml');
-  const root = existingDoc.documentElement;
-  const group = existingDoc.createElementNS('http://www.w3.org/2000/svg', 'g');
-  group.setAttribute('id', groupId);
-  for (const child of Array.from(newDoc.documentElement.children)) {
-    if (SKIP_IMPORT_TAGS.has(child.tagName.toLowerCase())) continue;
-    group.appendChild(existingDoc.importNode(child, true));
-  }
-  root.appendChild(group);
-  return new XMLSerializer().serializeToString(root);
-}
-
-export function collectDescendantLayerIds(layerId: string, layers: Layer[]): string[] {
-  const result = [layerId];
-  layers.filter(l => l.parentId === layerId).forEach(c => result.push(...collectDescendantLayerIds(c.id, layers)));
-  return result;
-}

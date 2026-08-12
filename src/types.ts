@@ -113,7 +113,6 @@ export interface Layer {
   visible: boolean;
   locked: boolean;
   expanded: boolean;
-  parentId?: string;
   anchorX: number;    // px from center, default 0
   anchorY: number;    // px from center, default 0
   motionPathId?: string;   // assigned MotionPath id

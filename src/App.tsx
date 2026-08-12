@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppProvider, useApp, emptyTracks } from './context/AppContext';
-import { AnimatableProperty, EasingConfig, Layer, PathPoint } from './types';
-import { removeElementsFromSvg, stripIds, wrapAndAppendSvgAsGroup, extractSvgDimensions } from './utils/svgDom';
-import { parseSvgLayers } from './utils/svgParser';
+import { AppProvider, useApp } from './context/AppContext';
+import { AnimatableProperty, EasingConfig, PathPoint } from './types';
+import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting, extractSvgDimensions } from './utils/svgDom';
+import { parseSvgLayers, flattenProjectLayers } from './utils/svgParser';
 import { extractProjectMetadata } from './utils/exporter';
 import { importAnimations, mergeImportedTracks, stripAnimationMarkup } from './utils/animationImporter';
 import { ThemeProvider } from './context/ThemeContext';
@@ -42,7 +42,8 @@ function KeyboardShortcuts() {
       try {
         const saved = extractProjectMetadata(svgText);
         if (saved) {
-          dispatch({ type: 'LOAD_PROJECT', svgSource: stripAnimationMarkup(svgText), layers: saved.layers, duration: saved.duration, canvasWidth: saved.canvasWidth, canvasHeight: saved.canvasHeight, motionPaths: saved.motionPaths ?? [] });
+          const flat = flattenProjectLayers(stripAnimationMarkup(svgText), saved.layers);
+          dispatch({ type: 'LOAD_PROJECT', svgSource: flat.source, layers: flat.layers, duration: saved.duration, canvasWidth: saved.canvasWidth, canvasHeight: saved.canvasHeight, motionPaths: saved.motionPaths ?? [] });
           return;
         }
         if (state.svgSource === null) {
@@ -58,15 +59,8 @@ function KeyboardShortcuts() {
           const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
           const { layerTracks, maxDuration, strippedSource } = importAnimations(newSource, newLayers);
           const finalNewLayers = mergeImportedTracks(newLayers, layerTracks);
-          const groupId = `svga-grp-${Date.now()}`;
-          const groupLayer: Layer = {
-            id: groupId, elementId: groupId, tagName: 'g', label: 'Imported SVG',
-            tracks: emptyTracks(), visible: true, locked: false, expanded: false,
-            parentId: undefined, anchorX: 0, anchorY: 0, autoRotate: false,
-          };
-          const wrappedLayers = finalNewLayers.map(l => !l.parentId ? { ...l, parentId: groupId } : l);
-          const mergedSvg = wrapAndAppendSvgAsGroup(state.svgSource, strippedSource, groupId);
-          dispatch({ type: 'MERGE_LAYERS', newLayers: [groupLayer, ...wrappedLayers], newSvgSource: mergedSvg });
+          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, strippedSource);
+          dispatch({ type: 'MERGE_LAYERS', newLayers: finalNewLayers, newSvgSource: mergedSvg });
           if (maxDuration > state.duration) dispatch({ type: 'SET_DURATION', duration: maxDuration });
         }
       } catch { /* ignore invalid SVG */ }
@@ -141,12 +135,16 @@ function KeyboardShortcuts() {
         if (state.selectedKeyframes.length > 0 || state.selectedPathKfIds.length > 0) {
           e.preventDefault();
           deleteSelectedKeyframes();
-        } else if (state.selectedLayerId && state.svgSource) {
+        } else if (state.selectedLayerIds.length > 0 && state.svgSource) {
           e.preventDefault();
-          const layer = state.layers.find(l => l.id === state.selectedLayerId);
-          if (layer) {
-            const newSvgSource = removeElementsFromSvg(state.svgSource, [layer.elementId]);
-            dispatch({ type: 'DELETE_LAYER', layerId: state.selectedLayerId, newSvgSource });
+          const doomed = state.layers.filter(l => state.selectedLayerIds.includes(l.id));
+          if (doomed.length) {
+            // Strip every element in one pass, then retire the layers one by one —
+            // each DELETE_LAYER carries the same already-final source.
+            const newSvgSource = removeElementsFromSvg(state.svgSource, doomed.map(l => l.elementId));
+            for (const l of doomed) {
+              dispatch({ type: 'DELETE_LAYER', layerId: l.id, newSvgSource });
+            }
           }
         }
         return;
@@ -167,7 +165,7 @@ function KeyboardShortcuts() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dispatch, deleteSelectedKeyframes, state.selectedKeyframes, state.selectedPathKfIds, state.isPlaying, state.svgSource, state.currentTime, state.duration, state.selectedLayerId, state.layers, kfClipboardRef]);
+  }, [dispatch, deleteSelectedKeyframes, state.selectedKeyframes, state.selectedPathKfIds, state.isPlaying, state.svgSource, state.currentTime, state.duration, state.selectedLayerId, state.selectedLayerIds, state.layers, kfClipboardRef]);
 
   return null;
 }

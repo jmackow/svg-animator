@@ -62,6 +62,7 @@ export type Action =
   | { type: 'LOAD_PROJECT'; svgSource: string; layers: AppState['layers']; duration: number; canvasWidth: number; canvasHeight: number; motionPaths?: MotionPath[] }
   | { type: 'SELECT_LAYER'; layerId: string | null }
   | { type: 'ADD_TO_LAYER_SELECTION'; layerId: string }
+  | { type: 'SET_LAYER_SELECTION'; layerIds: string[] }
   | { type: 'SELECT_KEYFRAMES'; kfs: SelectedKeyframe[] }
   | { type: 'ADD_TO_KEYFRAME_SELECTION'; kfs: SelectedKeyframe[] }
   | { type: 'MOVE_SELECTED_KFS_DELTA'; delta: number }
@@ -120,6 +121,7 @@ export type Action =
   | { type: 'SET_LAYER_BASE_VALUE'; layerId: string; property: AnimatableProperty; value: number }
   | { type: 'SET_LAYER_BASE_VALUE_SILENT'; layerId: string; property: AnimatableProperty; value: number }
   | { type: 'ADD_PROPERTY_KEYFRAME_SILENT'; layerId: string; property: AnimatableProperty; keyframe: PropertyKeyframe }
+  | { type: 'DELETE_PROPERTY_KEYFRAME_SILENT'; layerId: string; property: AnimatableProperty; keyframeId: string }
   | { type: 'SET_LAYER_ANCHOR_SILENT'; layerId: string; anchorX: number; anchorY: number };
 
 // Actions that push to history
@@ -150,36 +152,6 @@ const UNDOABLE = new Set<Action['type']>([
   'REORDER_LAYER',
   'SET_LAYER_BASE_VALUE',
 ]);
-
-// ─── Layer tree helpers ───────────────────────────────────────────────────────
-
-function collectDescendants(layerId: string, layers: AppState['layers']): string[] {
-  const result = [layerId];
-  layers.filter(l => l.parentId === layerId).forEach(c => result.push(...collectDescendants(c.id, layers)));
-  return result;
-}
-
-function collectSubtree(layerId: string, layers: AppState['layers']): AppState['layers'] {
-  const layer = layers.find(l => l.id === layerId);
-  if (!layer) return [];
-  const result: AppState['layers'] = [layer];
-  layers.filter(l => l.parentId === layerId).forEach(c => result.push(...collectSubtree(c.id, layers)));
-  return result;
-}
-
-function findEndOfSiblingGroup(remaining: AppState['layers'], parentId: string | undefined): number {
-  const siblingIds = new Set(remaining.filter(l => l.parentId === parentId).map(l => l.id));
-  if (siblingIds.size === 0) return remaining.length;
-  function isDescendantOfSibling(l: AppState['layers'][0]): boolean {
-    if (!l.parentId) return false;
-    if (siblingIds.has(l.parentId)) return true;
-    const parent = remaining.find(p => p.id === l.parentId);
-    return parent ? isDescendantOfSibling(parent) : false;
-  }
-  let last = -1;
-  remaining.forEach((l, i) => { if (siblingIds.has(l.id) || isDescendantOfSibling(l)) last = i; });
-  return last + 1;
-}
 
 // ─── Core reducer ─────────────────────────────────────────────────────────────
 
@@ -239,6 +211,20 @@ function coreReducer(state: AppState, action: Action): AppState {
         selectedKeyframes: [],
         selectedPathKfIds: [],
         layers: updateLayer(state.layers, action.layerId, l => ({ ...l, expanded: true })),
+      };
+    }
+
+    case 'SET_LAYER_SELECTION': {
+      const ids = action.layerIds;
+      return {
+        ...state,
+        selectedLayerIds: ids,
+        // The last id is the "primary" — it drives the properties panel and is the
+        // layer whose edits fan out to the rest.
+        selectedLayerId: ids.length > 0 ? ids[ids.length - 1] : null,
+        selectedKeyframes: [],
+        selectedPathKfIds: [],
+        selectedPointId: null,
       };
     }
 
@@ -361,7 +347,8 @@ function coreReducer(state: AppState, action: Action): AppState {
         ),
       };
 
-    case 'DELETE_PROPERTY_KEYFRAME': {
+    case 'DELETE_PROPERTY_KEYFRAME':
+    case 'DELETE_PROPERTY_KEYFRAME_SILENT': {
       const newSelectedKfs = state.selectedKeyframes.filter(
         (s) =>
           !(s.layerId === action.layerId &&
@@ -539,30 +526,30 @@ function coreReducer(state: AppState, action: Action): AppState {
       return { ...state, svgSource: action.newSvgSource, layers: [...state.layers, ...action.newLayers] };
 
     case 'DELETE_LAYER': {
-      const deletedIds = new Set(collectDescendants(action.layerId, state.layers));
+      const deletedId = action.layerId;
       return {
         ...state,
         svgSource: action.newSvgSource,
-        layers: state.layers.filter(l => !deletedIds.has(l.id)),
-        selectedLayerId: deletedIds.has(state.selectedLayerId ?? '') ? null : state.selectedLayerId,
-        selectedLayerIds: state.selectedLayerIds.filter(id => !deletedIds.has(id)),
-        selectedKeyframes: state.selectedKeyframes.filter(kf => !deletedIds.has(kf.layerId)),
+        layers: state.layers.filter(l => l.id !== deletedId),
+        selectedLayerId: state.selectedLayerId === deletedId ? null : state.selectedLayerId,
+        selectedLayerIds: state.selectedLayerIds.filter(id => id !== deletedId),
+        selectedKeyframes: state.selectedKeyframes.filter(kf => kf.layerId !== deletedId),
         selectedPathKfIds: [],
       };
     }
 
     case 'REORDER_LAYER': {
-      const subtree = collectSubtree(action.layerId, state.layers);
-      const subtreeIds = new Set(subtree.map(l => l.id));
-      const remaining = state.layers.filter(l => !subtreeIds.has(l.id));
+      const moved = state.layers.find(l => l.id === action.layerId);
+      if (!moved) return state;
+      const remaining = state.layers.filter(l => l.id !== action.layerId);
       const insertIdx = action.beforeId !== null
         ? remaining.findIndex(l => l.id === action.beforeId)
-        : findEndOfSiblingGroup(remaining, subtree[0]?.parentId);
+        : remaining.length;
       const idx = insertIdx === -1 ? remaining.length : insertIdx;
       return {
         ...state,
         svgSource: action.newSvgSource,
-        layers: [...remaining.slice(0, idx), ...subtree, ...remaining.slice(idx)],
+        layers: [...remaining.slice(0, idx), moved, ...remaining.slice(idx)],
       };
     }
 
@@ -624,6 +611,64 @@ function coreReducer(state: AppState, action: Action): AppState {
   }
 }
 
+// ─── Selection fan-out ────────────────────────────────────────────────────────
+
+// Layer-scoped actions whose meaning carries over to a whole selection: editing
+// the primary layer while several are selected applies the same change to all of
+// them. Deliberately excludes anything keyframe-id-scoped (a keyframe id only
+// exists on one layer) and the SILENT drag actions, which already address each
+// layer explicitly.
+const BATCHABLE = new Set<Action['type']>([
+  'SET_LAYER_DEFAULT_COLORS',
+  'SET_LAYER_GRADIENT',
+  'SET_LAYER_COLOR_NONE',
+  'SET_LAYER_SKELETON_COLORS',
+  'SET_LAYER_AUTO_ROTATE',
+  'SET_LAYER_MOTION_PATH',
+  'SET_LAYER_ANCHOR',
+]);
+
+// Toggles can't simply be replayed per layer — that would flip each one
+// independently and leave a mixed selection mixed. Apply the toggle to the
+// primary layer, then drive the rest to whatever value it landed on.
+const TOGGLE_FIELDS: Partial<Record<Action['type'], 'visible' | 'locked' | 'skeletonMode'>> = {
+  TOGGLE_LAYER_VISIBILITY: 'visible',
+  TOGGLE_LAYER_LOCK: 'locked',
+  TOGGLE_LAYER_SKELETON: 'skeletonMode',
+};
+
+function selectionReducer(state: AppState, action: Action): AppState {
+  const layerId = (action as { layerId?: string }).layerId;
+  const selection = state.selectedLayerIds;
+  const fansOut =
+    typeof layerId === 'string' && selection.length > 1 && selection.includes(layerId);
+
+  if (fansOut) {
+    const toggleField = TOGGLE_FIELDS[action.type];
+    if (toggleField) {
+      const next = coreReducer(state, action);
+      const primary = next.layers.find(l => l.id === layerId);
+      if (!primary) return next;
+      const value = primary[toggleField];
+      return {
+        ...next,
+        layers: next.layers.map(l =>
+          l.id !== layerId && selection.includes(l.id) ? { ...l, [toggleField]: value } : l
+        ),
+      };
+    }
+
+    if (BATCHABLE.has(action.type)) {
+      return selection.reduce(
+        (acc, id) => coreReducer(acc, { ...action, layerId: id } as Action),
+        state
+      );
+    }
+  }
+
+  return coreReducer(state, action);
+}
+
 // ─── History wrapper ──────────────────────────────────────────────────────────
 
 const MAX_HISTORY = 60;
@@ -665,7 +710,7 @@ function historyReducer(history: History, action: HistoryAction): History {
     };
   }
 
-  const newPresent = coreReducer(history.present, action as Action);
+  const newPresent = selectionReducer(history.present, action as Action);
 
   if (UNDOABLE.has((action as Action).type)) {
     return {
@@ -688,6 +733,7 @@ interface AppContextValue {
   togglePropertyKeyframe: (layerId: string, property: AnimatableProperty) => void;
   deleteSelectedKeyframes: () => void;
   getOrCreateKfAt: (layerId: string, property: AnimatableProperty, time: number, silent?: boolean) => string;
+  setPropertyOnSelection: (primaryLayerId: string, property: AnimatableProperty, value: number) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -703,35 +749,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const togglePropertyKeyframe = useCallback(
     (layerId: string, property: AnimatableProperty) => {
-      const layer = state.layers.find((l) => l.id === layerId);
-      if (!layer || layer.locked) return;
-
-      const existing = layer.tracks[property].find(
-        (kf) => Math.abs(kf.time - state.currentTime) < 0.001
+      // With several layers selected, key or unkey all of them together. Whether
+      // to add or remove is decided by the layer that was clicked, so a mixed
+      // selection converges instead of flipping each layer independently.
+      const ids = state.selectedLayerIds.includes(layerId) ? state.selectedLayerIds : [layerId];
+      const clicked = state.layers.find(l => l.id === layerId);
+      if (!clicked) return;
+      const removing = clicked.tracks[property].some(
+        kf => Math.abs(kf.time - state.currentTime) < 0.001
       );
 
-      if (existing) {
-        dispatch({ type: 'DELETE_PROPERTY_KEYFRAME', layerId, property, keyframeId: existing.id });
-      } else {
-        const defaultVal = layer.tracks[property].length === 0
-          ? (layer.baseValues?.[property] ?? PROPERTY_DEFAULTS[property])
-          : PROPERTY_DEFAULTS[property];
-        const value = interpolateProperty(
-          layer.tracks[property],
-          state.currentTime,
-          defaultVal
+      // One snapshot for the whole batch, then silent writes — a single undo step.
+      dispatch({ type: 'PUSH_SNAPSHOT' });
+
+      const added: SelectedKeyframe[] = [];
+      for (const id of ids) {
+        const layer = state.layers.find((l) => l.id === id);
+        if (!layer || layer.locked) continue;
+
+        const existing = layer.tracks[property].find(
+          (kf) => Math.abs(kf.time - state.currentTime) < 0.001
         );
-        const kf: PropertyKeyframe = {
-          id: `kf-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          time: state.currentTime,
-          value,
-          easing: DEFAULT_EASING,
-        };
-        dispatch({ type: 'ADD_PROPERTY_KEYFRAME', layerId, property, keyframe: kf });
-        dispatch({ type: 'SELECT_KEYFRAMES', kfs: [{ layerId, property, keyframeId: kf.id }] });
+
+        if (removing) {
+          if (existing) {
+            dispatch({ type: 'DELETE_PROPERTY_KEYFRAME_SILENT', layerId: id, property, keyframeId: existing.id });
+          }
+        } else if (!existing) {
+          const defaultVal = layer.tracks[property].length === 0
+            ? (layer.baseValues?.[property] ?? PROPERTY_DEFAULTS[property])
+            : PROPERTY_DEFAULTS[property];
+          const value = interpolateProperty(
+            layer.tracks[property],
+            state.currentTime,
+            defaultVal
+          );
+          const kf: PropertyKeyframe = {
+            id: `kf-${Date.now()}-${Math.random().toString(36).slice(2)}-${id}`,
+            time: state.currentTime,
+            value,
+            easing: DEFAULT_EASING,
+          };
+          dispatch({ type: 'ADD_PROPERTY_KEYFRAME_SILENT', layerId: id, property, keyframe: kf });
+          added.push({ layerId: id, property, keyframeId: kf.id });
+        }
       }
+      if (added.length) dispatch({ type: 'SELECT_KEYFRAMES', kfs: added });
     },
-    [state.layers, state.currentTime]
+    [state.layers, state.selectedLayerIds, state.currentTime]
   );
 
   const deleteSelectedKeyframes = useCallback(() => {
@@ -771,6 +836,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.layers, state.currentTime] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // Writes a numeric property across the whole selection. The keyframe-vs-base
+  // decision can't be made once for everyone — each layer has its own tracks — so
+  // it's resolved per layer: edit the keyframe at the playhead if there is one,
+  // otherwise set the base value, otherwise key a new frame at the playhead.
+  const setPropertyOnSelection = useCallback(
+    (primaryLayerId: string, property: AnimatableProperty, value: number) => {
+      const ids = state.selectedLayerIds.includes(primaryLayerId)
+        ? state.selectedLayerIds
+        : [primaryLayerId];
+
+      // One snapshot up front plus silent writes, so the whole batch collapses
+      // into a single undo step instead of one per layer.
+      dispatch({ type: 'PUSH_SNAPSHOT' });
+
+      for (const id of ids) {
+        const layer = state.layers.find(l => l.id === id);
+        if (!layer || layer.locked) continue;
+
+        const kfAtPlayhead = layer.tracks[property].find(
+          kf => Math.abs(kf.time - state.currentTime) < 0.001
+        );
+        if (kfAtPlayhead) {
+          dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME_SILENT', layerId: id, property, keyframeId: kfAtPlayhead.id, value });
+        } else if (layer.tracks[property].length === 0) {
+          dispatch({ type: 'SET_LAYER_BASE_VALUE_SILENT', layerId: id, property, value });
+        } else {
+          dispatch({
+            type: 'ADD_PROPERTY_KEYFRAME_SILENT',
+            layerId: id,
+            property,
+            keyframe: {
+              id: `kf-${Date.now()}-${Math.random().toString(36).slice(2)}-${id}`,
+              time: state.currentTime,
+              value,
+              easing: DEFAULT_EASING,
+            },
+          });
+        }
+      }
+    },
+    [state.layers, state.selectedLayerIds, state.currentTime]
+  );
+
   return (
     <AppContext.Provider
       value={{
@@ -781,6 +889,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         togglePropertyKeyframe,
         deleteSelectedKeyframes,
         getOrCreateKfAt,
+        setPropertyOnSelection,
       }}
     >
       {children}

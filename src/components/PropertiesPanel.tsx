@@ -72,7 +72,7 @@ interface PropRowProps {
 }
 
 function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
-  const { state, dispatch, togglePropertyKeyframe } = useApp();
+  const { state, dispatch, togglePropertyKeyframe, setPropertyOnSelection } = useApp();
   const layer = state.layers.find((l) => l.id === layerId)!;
 
   const kfAtPlayhead = layer.tracks[property].find(
@@ -101,7 +101,9 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
   function commitValue(numStr: string) {
     const n = parseFloat(numStr);
     if (isNaN(n)) return;
-    if (editableKf) {
+    if (state.selectedLayerIds.length > 1) {
+      setPropertyOnSelection(layerId, property, clamp(n));
+    } else if (editableKf) {
       dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId, property, keyframeId: editableKf.id, value: clamp(n) });
     } else if (isBaseMode) {
       dispatch({ type: 'SET_LAYER_BASE_VALUE', layerId, property, value: clamp(n) });
@@ -114,7 +116,7 @@ function PropRow({ layerId, property, step, min, max, suffix }: PropRowProps) {
   }
 
   const hasKfAtPlayhead = !!kfAtPlayhead;
-  const isEditable = !!editableKf || isBaseMode;
+  const isEditable = !!editableKf || isBaseMode || state.selectedLayerIds.length > 1;
   const shortLabel = PROPERTY_LABELS[property].split(' ')[1] || PROPERTY_LABELS[property];
 
   return (
@@ -151,7 +153,7 @@ function CompactPropInput({ layerId, property, label, step, min, max, suffix }: 
   layerId: string; property: AnimatableProperty; label: string;
   step: number; min?: number; max?: number; suffix?: string;
 }) {
-  const { state, dispatch, togglePropertyKeyframe } = useApp();
+  const { state, dispatch, togglePropertyKeyframe, setPropertyOnSelection } = useApp();
   const layer = state.layers.find(l => l.id === layerId)!;
 
   const kfAtPlayhead = layer.tracks[property].find(kf => Math.abs(kf.time - state.currentTime) < 0.001);
@@ -179,14 +181,16 @@ function CompactPropInput({ layerId, property, label, step, min, max, suffix }: 
   function commitValue(numStr: string) {
     const n = parseFloat(numStr);
     if (isNaN(n)) return;
-    if (editableKf) {
+    if (state.selectedLayerIds.length > 1) {
+      setPropertyOnSelection(layerId, property, clamp(n));
+    } else if (editableKf) {
       dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId, property, keyframeId: editableKf.id, value: clamp(n) });
     } else if (isBaseMode) {
       dispatch({ type: 'SET_LAYER_BASE_VALUE', layerId, property, value: clamp(n) });
     }
   }
 
-  const isEditable = !!editableKf || isBaseMode;
+  const isEditable = !!editableKf || isBaseMode || state.selectedLayerIds.length > 1;
   const cls = `compact-prop${kfAtPlayhead ? ' compact-prop--keyed' : editableKf ? ' compact-prop--selected-kf' : ''}`;
 
   return (
@@ -630,7 +634,7 @@ function ColorPickerPopup({
 // ─── Color Row ────────────────────────────────────────────────────────────────
 
 function ColorRow({ layerId, property }: { layerId: string; property: 'fillColor' | 'strokeColor' }) {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, setPropertyOnSelection } = useApp();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerAnchor, setPickerAnchor] = useState({ x: 0, y: 0 });
 
@@ -658,21 +662,30 @@ function ColorRow({ layerId, property }: { layerId: string; property: 'fillColor
 
   function handleColorChange(hex: string) {
     const packed = packColor(hex);
-    const kf = layer.tracks[property].find(k => Math.abs(k.time - state.currentTime) < 0.001);
-    if (kf) {
-      dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId, property, keyframeId: kf.id, value: packed });
-    } else if (!hasKfs) {
-      dispatch({ type: 'SET_LAYER_DEFAULT_COLORS', layerId, [defaultColorKey]: hex });
+    // A layer with no colour keyframes stores its colour as a default attribute
+    // rather than a base value, so this can't go through setPropertyOnSelection.
+    const ids = state.selectedLayerIds.includes(layerId) ? state.selectedLayerIds : [layerId];
+    for (const id of ids) {
+      const l = state.layers.find(x => x.id === id);
+      if (!l || l.locked) continue;
+      const kf = l.tracks[property].find(k => Math.abs(k.time - state.currentTime) < 0.001);
+      if (kf) {
+        dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId: id, property, keyframeId: kf.id, value: packed });
+      } else if (l.tracks[property].length === 0) {
+        dispatch({ type: 'SET_LAYER_DEFAULT_COLORS', layerId: id, [defaultColorKey]: hex });
+      } else {
+        dispatch({
+          type: 'ADD_PROPERTY_KEYFRAME',
+          layerId: id,
+          property,
+          keyframe: { id: `kf-${Date.now()}-${Math.random().toString(36).slice(2)}`, time: state.currentTime, value: packed, easing: DEFAULT_EASING },
+        });
+      }
     }
   }
 
   function handleOpacityChange(val: number) {
-    const kf = layer.tracks[opacityProperty].find(k => Math.abs(k.time - state.currentTime) < 0.001);
-    if (kf) {
-      dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId, property: opacityProperty, keyframeId: kf.id, value: val });
-    } else if (layer.tracks[opacityProperty].length === 0) {
-      dispatch({ type: 'SET_LAYER_BASE_VALUE', layerId, property: opacityProperty, value: val });
-    }
+    setPropertyOnSelection(layerId, opacityProperty, val);
   }
 
   function setMode(m: 'solid' | 'gradient') {
@@ -1046,8 +1059,13 @@ export default function PropertiesPanel() {
     <div className="properties-panel">
       <div className="panel-header">
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {layer.label}
+          {state.selectedLayerIds.length > 1
+            ? `${state.selectedLayerIds.length} layers selected`
+            : layer.label}
         </span>
+        {state.selectedLayerIds.length > 1 && (
+          <span className="panel-count" title="Edits apply to every selected layer">batch</span>
+        )}
       </div>
 
       {isPathLike && pointSelected ? (

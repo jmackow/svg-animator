@@ -132,7 +132,9 @@ export default function Canvas() {
   const svgContainerRef = useRef<HTMLDivElement>(null);
   const canvasFrameRef = useRef<HTMLDivElement>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
-  const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null);
+
+  // Marquee rect in client coords (null when not dragging)
+  const [marquee, setMarquee] = useState<{ left: number; top: number; right: number; bottom: number } | null>(null);
 
   // Pan state
   const [panX, setPanX] = useState(0);
@@ -151,13 +153,11 @@ export default function Canvas() {
   const layersRef = useRef(state.layers);
   const motionPathsRef = useRef(state.motionPaths);
   const stateRef = useRef(state);
-  const enteredGroupIdRef = useRef<string | null>(null);
   const cmdHoverLayerIdLocalRef = useRef<string | null>(null); // local dedup
 
   useEffect(() => { layersRef.current = state.layers; }, [state.layers]);
   useEffect(() => { motionPathsRef.current = state.motionPaths; }, [state.motionPaths]);
   useEffect(() => { stateRef.current = state; }, [state]);
-  useEffect(() => { enteredGroupIdRef.current = enteredGroupId; }, [enteredGroupId]);
   useEffect(() => { panXRef.current = panX; }, [panX]);
   useEffect(() => { panYRef.current = panY; }, [panY]);
   useEffect(() => { canvasZoomRef.current = state.canvasZoom; }, [state.canvasZoom]);
@@ -435,18 +435,6 @@ export default function Canvas() {
       return null;
     }
 
-    function findChildOfGroup(target: Element | null, groupLayerId: string) {
-      let el: Element | null = target;
-      while (el && el !== svgEl) {
-        if (el.id) {
-          const layer = layersRef.current.find((l) => l.elementId === el!.id && l.parentId === groupLayerId);
-          if (layer) return layer;
-        }
-        el = el.parentElement;
-      }
-      return null;
-    }
-
     function handleClick(e: MouseEvent) {
       const target = e.target as Element;
       dispatch({ type: 'SET_SELECTED_MOTION_PATH', id: null });
@@ -456,19 +444,6 @@ export default function Canvas() {
           dispatch({ type: 'ADD_TO_LAYER_SELECTION', layerId: layer.id });
         } else {
           dispatch({ type: 'SELECT_LAYER', layerId: null });
-        }
-        setEnteredGroupId(null);
-        return;
-      }
-      const eg = enteredGroupIdRef.current;
-      if (eg) {
-        const child = findChildOfGroup(target, eg);
-        if (child) {
-          dispatch({ type: 'SELECT_LAYER', layerId: child.id });
-        } else {
-          setEnteredGroupId(null);
-          const layer = findLayer(target);
-          dispatch({ type: 'SELECT_LAYER', layerId: layer?.id ?? null });
         }
         return;
       }
@@ -484,13 +459,6 @@ export default function Canvas() {
         }
       }
       dispatch({ type: 'SELECT_LAYER', layerId: clickedLayer?.id ?? null });
-    }
-
-    function handleDblClick(e: MouseEvent) {
-      const layer = findLayer(e.target as Element);
-      if (layer && layer.tagName.toLowerCase() === 'g') {
-        setEnteredGroupId(layer.id);
-      }
     }
 
     function handleMouseMove(e: MouseEvent) {
@@ -520,18 +488,15 @@ export default function Canvas() {
         cmdHoverLayerIdLocalRef.current = null;
         dispatch({ type: 'SET_CMD_HOVER_LAYER', layerId: null });
       }
-      if (e.key === 'Escape') setEnteredGroupId(null);
     }
 
     svgEl.addEventListener('click', handleClick);
-    svgEl.addEventListener('dblclick', handleDblClick);
     svgEl.addEventListener('mousemove', handleMouseMove);
     svgEl.addEventListener('mouseleave', handleMouseLeave);
     window.addEventListener('keyup', handleKeyUp);
 
     return () => {
       svgEl.removeEventListener('click', handleClick);
-      svgEl.removeEventListener('dblclick', handleDblClick);
       svgEl.removeEventListener('mousemove', handleMouseMove);
       svgEl.removeEventListener('mouseleave', handleMouseLeave);
       window.removeEventListener('keyup', handleKeyUp);
@@ -548,7 +513,74 @@ export default function Canvas() {
     }
   }
 
+  // Rubber-band select. Only starts on empty space — a drag that begins on a shape
+  // is left alone so the transform overlay keeps its move behaviour.
+  function startMarqueeSelect(e: React.MouseEvent) {
+    const svgEl = svgContainerRef.current?.querySelector('svg') as SVGSVGElement | null;
+    if (!svgEl) return false;
+
+    let el: Element | null = e.target as Element;
+    while (el && el !== svgEl) {
+      if (el.id && layersRef.current.some(l => l.elementId === el!.id)) return false;
+      el = el.parentElement;
+    }
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    const baseSelection = additive ? [...stateRef.current.selectedLayerIds] : [];
+    let moved = false;
+
+    function rectFrom(mx: number, my: number) {
+      return {
+        left: Math.min(startX, mx), top: Math.min(startY, my),
+        right: Math.max(startX, mx), bottom: Math.max(startY, my),
+      };
+    }
+
+    function hitLayerIds(r: ReturnType<typeof rectFrom>): string[] {
+      const hits: string[] = [];
+      for (const layer of layersRef.current) {
+        if (!layer.visible || layer.locked) continue;
+        const node = svgEl!.getElementById(layer.elementId) as SVGGraphicsElement | null;
+        if (!node) continue;
+        const b = node.getBoundingClientRect();
+        if (b.width === 0 && b.height === 0) continue;
+        // Intersection, not containment — brushing a shape picks it up.
+        if (b.right >= r.left && b.left <= r.right && b.bottom >= r.top && b.top <= r.bottom) {
+          hits.push(layer.id);
+        }
+      }
+      return hits;
+    }
+
+    function onMove(mv: MouseEvent) {
+      if (!moved && Math.abs(mv.clientX - startX) < 3 && Math.abs(mv.clientY - startY) < 3) return;
+      moved = true;
+      const r = rectFrom(mv.clientX, mv.clientY);
+      setMarquee(r);
+      const hits = hitLayerIds(r);
+      const merged = [...baseSelection.filter(id => !hits.includes(id)), ...hits];
+      dispatch({ type: 'SET_LAYER_SELECTION', layerIds: merged });
+    }
+
+    function onUp() {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setMarquee(null);
+      if (moved) pannedRef.current = true; // suppress the click that clears selection
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return true;
+  }
+
   function handleCanvasMouseDown(e: React.MouseEvent) {
+    if (!spaceHeldRef.current && e.button === 0) {
+      startMarqueeSelect(e);
+      return;
+    }
     if (!spaceHeldRef.current || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -592,11 +624,16 @@ export default function Canvas() {
       onMouseEnter={() => { mouseOverCanvasRef.current = true; }}
       onMouseLeave={() => { mouseOverCanvasRef.current = false; }}
     >
-      {enteredGroupId && (
-        <div className="canvas-group-breadcrumb">
-          Inside: <strong>{state.layers.find((l) => l.id === enteredGroupId)?.label ?? 'Group'}</strong>
-          <button onClick={() => setEnteredGroupId(null)}>✕ Exit</button>
-        </div>
+      {marquee && (
+        <div
+          className="canvas-marquee"
+          style={{
+            left: marquee.left,
+            top: marquee.top,
+            width: marquee.right - marquee.left,
+            height: marquee.bottom - marquee.top,
+          }}
+        />
       )}
       {!state.svgSource ? (
         <div className="canvas-empty">

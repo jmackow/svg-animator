@@ -3,9 +3,9 @@ import { ArrowCounterClockwise, ArrowClockwise } from '@phosphor-icons/react';
 import { useApp } from '../context/AppContext';
 import { emptyTracks } from '../context/AppContext';
 import ThemePicker from './ThemePicker';
-import { parseSvgLayers } from '../utils/svgParser';
+import { parseSvgLayers, flattenProjectLayers } from '../utils/svgParser';
 import { exportAnimatedSvg, downloadSvg, extractProjectMetadata } from '../utils/exporter';
-import { stripIds, wrapAndAppendSvgAsGroup, appendRawElementToSvg, createMinimalSvg, extractSvgDimensions } from '../utils/svgDom';
+import { stripIds, appendSvgChildrenToExisting, appendRawElementToSvg, createMinimalSvg, extractSvgDimensions } from '../utils/svgDom';
 import { importAnimations, mergeImportedTracks, stripAnimationMarkup } from '../utils/animationImporter';
 import { Layer } from '../types';
 
@@ -40,10 +40,11 @@ export default function Toolbar() {
       try {
         const saved = extractProjectMetadata(text);
         if (saved) {
+          const flat = flattenProjectLayers(stripAnimationMarkup(text), saved.layers);
           dispatch({
             type: 'LOAD_PROJECT',
-            svgSource: stripAnimationMarkup(text),
-            layers: saved.layers,
+            svgSource: flat.source,
+            layers: flat.layers,
             duration: saved.duration,
             canvasWidth: saved.canvasWidth,
             canvasHeight: saved.canvasHeight,
@@ -69,16 +70,8 @@ export default function Toolbar() {
           const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
           const { layerTracks, maxDuration, strippedSource } = importAnimations(newSource, newLayers);
           const finalNewLayers = mergeImportedTracks(newLayers, layerTracks);
-          const groupId = `svga-grp-${Date.now()}`;
-          const groupLabel = file.name.replace(/\.[^.]+$/, '');
-          const groupLayer: Layer = {
-            id: groupId, elementId: groupId, tagName: 'g', label: groupLabel,
-            tracks: emptyTracks(), visible: true, locked: false, expanded: false,
-            parentId: undefined, anchorX: 0, anchorY: 0, autoRotate: false,
-          };
-          const wrappedLayers = finalNewLayers.map(l => !l.parentId ? { ...l, parentId: groupId } : l);
-          const mergedSvg = wrapAndAppendSvgAsGroup(state.svgSource, strippedSource, groupId);
-          dispatch({ type: 'MERGE_LAYERS', newLayers: [groupLayer, ...wrappedLayers], newSvgSource: mergedSvg });
+          const mergedSvg = appendSvgChildrenToExisting(state.svgSource, strippedSource);
+          dispatch({ type: 'MERGE_LAYERS', newLayers: finalNewLayers, newSvgSource: mergedSvg });
           if (maxDuration > state.duration) dispatch({ type: 'SET_DURATION', duration: maxDuration });
         }
       } catch {
