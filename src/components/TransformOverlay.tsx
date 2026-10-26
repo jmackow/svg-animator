@@ -382,7 +382,7 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
   // Snapshots every selected layer relative to the selection pivot. `needPosition`
   // is false for a lone layer, which turns about its own anchor and so never needs
   // its x/y rewritten.
-  function captureGroupStarts(needPosition: boolean): LayerTransformStart[] {
+  function captureGroupStarts(needPosition: boolean, kind: 'rotate' | 'scale'): LayerTransformStart[] {
     const svgEl = svgContainerRef.current?.querySelector('svg') as SVGSVGElement | null;
     const out: LayerTransformStart[] = [];
 
@@ -417,9 +417,11 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
         startRot: v.rotation,
         startScaleX: v.scaleX,
         startScaleY: v.scaleY,
-        kfRot: rotEmpty ? undefined : getOrCreateKfAt(layer.id, 'rotation', state.currentTime, true),
-        kfScaleX: sxEmpty ? undefined : getOrCreateKfAt(layer.id, 'scaleX', state.currentTime, true),
-        kfScaleY: syEmpty ? undefined : getOrCreateKfAt(layer.id, 'scaleY', state.currentTime, true),
+        // Only key the properties this drag actually writes — keying the others
+        // would litter the tracks with keyframes the user never asked for.
+        kfRot: kind !== 'rotate' || rotEmpty ? undefined : getOrCreateKfAt(layer.id, 'rotation', state.currentTime, true),
+        kfScaleX: kind !== 'scale' || sxEmpty ? undefined : getOrCreateKfAt(layer.id, 'scaleX', state.currentTime, true),
+        kfScaleY: kind !== 'scale' || syEmpty ? undefined : getOrCreateKfAt(layer.id, 'scaleY', state.currentTime, true),
         kfX: !needPosition || xEmpty ? undefined : getOrCreateKfAt(layer.id, 'x', state.currentTime, true),
         kfY: !needPosition || yEmpty ? undefined : getOrCreateKfAt(layer.id, 'y', state.currentTime, true),
         baseRot: rotEmpty,
@@ -439,7 +441,7 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
     if (!selectedLayer || (!isMulti && selectedLayer.locked)) return;
 
     dispatch({ type: 'PUSH_SNAPSHOT' });
-    const groupStarts = captureGroupStarts(isMulti);
+    const groupStarts = captureGroupStarts(isMulti, 'rotate');
     if (groupStarts.length === 0) return;
 
     const rect = svgContainerRef.current?.getBoundingClientRect();
@@ -499,7 +501,7 @@ export default function TransformOverlay({ svgContainerRef, canvasWidth, canvasH
     if (!selectedLayer || (!isMulti && selectedLayer.locked)) return;
 
     dispatch({ type: 'PUSH_SNAPSHOT' });
-    const groupStarts = captureGroupStarts(isMulti);
+    const groupStarts = captureGroupStarts(isMulti, 'scale');
     if (groupStarts.length === 0) return;
 
     const cornerOffsets: [number, number][] = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]];

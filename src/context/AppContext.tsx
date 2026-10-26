@@ -115,6 +115,7 @@ export type Action =
   | { type: 'MOVE_PATH_KEYFRAME_SILENT'; layerId: string; keyframeId: string; time: number }
   | { type: 'SELECT_PATH_KEYFRAMES'; kfIds: string[] }
   | { type: 'ADD_TO_PATH_KF_SELECTION'; kfIds: string[] }
+  | { type: 'DUPLICATE_LAYERS'; sourceLayerIds: string[]; idMap: Map<string, string>; newSvgSource: string }
   | { type: 'GROUP_LAYERS'; groupLayer: AppState['layers'][0]; childIds: string[]; newSvgSource: string }
   | { type: 'UNGROUP_LAYER'; groupId: string; newSvgSource: string }
   | { type: 'MERGE_LAYERS'; newLayers: AppState['layers']; newSvgSource: string }
@@ -155,6 +156,7 @@ const UNDOABLE = new Set<Action['type']>([
   'SET_LAYER_BASE_VALUE',
   'GROUP_LAYERS',
   'UNGROUP_LAYER',
+  'DUPLICATE_LAYERS',
 ]);
 
 // ─── Layer tree helpers ───────────────────────────────────────────────────────
@@ -171,6 +173,21 @@ export function collectDescendantIds(layerId: string, layers: AppState['layers']
         grew = true;
       }
     }
+  }
+  return out;
+}
+
+let kfIdCounter = 0;
+function makeKfId(prefix: 'kf' | 'pkf'): string {
+  return `${prefix}-${Date.now().toString(36)}-${kfIdCounter++}`;
+}
+
+// Copies a layer's tracks, re-issuing every keyframe id so the copy's keyframes
+// are distinct from the original's.
+function cloneTracks(tracks: PropertyTracks): PropertyTracks {
+  const out = {} as PropertyTracks;
+  for (const p of ALL_PROPERTIES) {
+    out[p] = tracks[p].map(kf => ({ ...kf, id: makeKfId('kf') }));
   }
   return out;
 }
@@ -599,6 +616,66 @@ function coreReducer(state: AppState, action: Action): AppState {
       };
     }
 
+    case 'DUPLICATE_LAYERS': {
+      const { idMap } = action;
+      const copies: AppState['layers'] = [];
+      // Highest index first, so splicing one subtree in doesn't shift the next.
+      const insertions: Array<{ at: number; layers: AppState['layers'] }> = [];
+
+      for (const rootId of action.sourceLayerIds) {
+        const ids = collectDescendantIds(rootId, state.layers);
+        const subtree = state.layers.filter(l => ids.has(l.id));
+        if (subtree.length === 0) continue;
+
+        const made: AppState['layers'] = [];
+        for (const l of subtree) {
+          const newId = idMap.get(l.elementId);
+          if (!newId) continue;
+          made.push({
+            ...l,
+            id: newId,
+            elementId: newId,
+            // Only the layer the user duplicated gets renamed; nested children
+            // keep their names so a copied group still reads the same inside.
+            label: l.id === rootId ? `${l.label} copy` : l.label,
+            // Re-point a child at the copied group rather than the original.
+            parentId: l.parentId ? idMap.get(l.parentId) ?? l.parentId : undefined,
+            tracks: cloneTracks(l.tracks),
+            // Path keyframe ids are looked up across all layers, so these have to
+            // be unique globally, not just within the layer.
+            pathKeyframes: l.pathKeyframes?.map(kf => ({ ...kf, id: makeKfId('pkf') })),
+          });
+        }
+
+        if (made.length === 0) continue;
+        copies.push(...made);
+        const lastIdx = state.layers.reduce((acc, l, i) => (ids.has(l.id) ? i : acc), -1);
+        insertions.push({ at: lastIdx + 1, layers: made });
+      }
+
+      if (copies.length === 0) return state;
+
+      let layers = [...state.layers];
+      for (const ins of insertions.sort((a, b) => b.at - a.at)) {
+        layers = [...layers.slice(0, ins.at), ...ins.layers, ...layers.slice(ins.at)];
+      }
+
+      const newRootIds = action.sourceLayerIds
+        .map(id => idMap.get(id))
+        .filter((id): id is string => !!id);
+
+      return {
+        ...state,
+        svgSource: action.newSvgSource,
+        layers,
+        selectedLayerId: newRootIds[newRootIds.length - 1] ?? state.selectedLayerId,
+        selectedLayerIds: newRootIds,
+        selectedKeyframes: [],
+        selectedPathKfIds: [],
+        selectedPointId: null,
+      };
+    }
+
     case 'GROUP_LAYERS': {
       const childSet = new Set(action.childIds);
       const children = state.layers
@@ -833,7 +910,7 @@ interface AppContextValue {
   togglePropertyKeyframe: (layerId: string, property: AnimatableProperty) => void;
   deleteSelectedKeyframes: () => void;
   getOrCreateKfAt: (layerId: string, property: AnimatableProperty, time: number, silent?: boolean) => string;
-  setPropertyOnSelection: (primaryLayerId: string, property: AnimatableProperty, value: number) => void;
+  setPropertyOnSelection: (primaryLayerId: string, property: AnimatableProperty, value: number, opts?: { continuing?: boolean }) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -941,14 +1018,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // it's resolved per layer: edit the keyframe at the playhead if there is one,
   // otherwise set the base value, otherwise key a new frame at the playhead.
   const setPropertyOnSelection = useCallback(
-    (primaryLayerId: string, property: AnimatableProperty, value: number) => {
+    (primaryLayerId: string, property: AnimatableProperty, value: number, opts?: { continuing?: boolean }) => {
       const ids = state.selectedLayerIds.includes(primaryLayerId)
         ? state.selectedLayerIds
         : [primaryLayerId];
 
       // One snapshot up front plus silent writes, so the whole batch collapses
-      // into a single undo step instead of one per layer.
-      dispatch({ type: 'PUSH_SNAPSHOT' });
+      // into a single undo step instead of one per layer. Callers driving a
+      // continuous drag pass `continuing` and take the snapshot themselves once,
+      // at the start — otherwise every mouse move would push another entry and
+      // quickly evict all real history.
+      if (!opts?.continuing) dispatch({ type: 'PUSH_SNAPSHOT' });
 
       for (const id of ids) {
         const layer = state.layers.find(l => l.id === id);

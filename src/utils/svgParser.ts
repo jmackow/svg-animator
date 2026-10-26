@@ -104,11 +104,16 @@ function flattenGroups(parent: Element): boolean {
 // shapes inside them are. Elements are given ids here if they lack one, and any
 // element repeating an id already claimed is re-issued a fresh one so every layer
 // maps to exactly one element.
-function shapeElements(svgEl: Element): {
+function shapeElements(svgEl: Element, reservedIds?: Iterable<string>): {
   list: Array<{ el: Element; id: string; parentId?: string }>;
   changed: boolean;
 } {
-  const taken = new Set<string>();
+  // Ids the caller says are spoken for — when merging into an already-open
+  // project, its ids aren't reachable from this document, so they have to be
+  // passed in. Reusing one would make getElementById resolve to the wrong
+  // element, leaving the new layer unselectable.
+  const reserved = new Set<string>(reservedIds ?? []);
+  const taken = new Set<string>(reserved);
   for (const el of Array.from(svgEl.ownerDocument!.querySelectorAll('[id]'))) {
     taken.add(el.getAttribute('id')!);
   }
@@ -118,7 +123,7 @@ function shapeElements(svgEl: Element): {
 
   function claimId(el: Element): string {
     let id = el.getAttribute('id');
-    if (!id || seen.has(id)) {
+    if (!id || seen.has(id) || reserved.has(id)) {
       id = makeId(taken);
       el.setAttribute('id', id);
       changed = true;
@@ -171,7 +176,12 @@ function newLayer(el: Element, id: string, index: number, parentId?: string): La
   };
 }
 
-export function parseSvgLayers(svgSource: string): { layers: Layer[]; source: string } {
+// `reservedIds` lets a caller merging into an open project hand over the ids that
+// document already uses, so newly generated ones can't collide with them.
+export function parseSvgLayers(
+  svgSource: string,
+  reservedIds?: Iterable<string>
+): { layers: Layer[]; source: string } {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgSource, 'image/svg+xml');
 
@@ -180,7 +190,7 @@ export function parseSvgLayers(svgSource: string): { layers: Layer[]; source: st
 
   const svgEl = doc.documentElement;
   const flattened = flattenGroups(svgEl);
-  const { list, changed } = shapeElements(svgEl);
+  const { list, changed } = shapeElements(svgEl, reservedIds);
 
   const layers = list.map(({ el, id, parentId }, i) => newLayer(el, id, i, parentId));
 

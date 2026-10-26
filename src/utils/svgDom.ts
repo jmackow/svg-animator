@@ -1,5 +1,13 @@
 const SKIP_IMPORT_TAGS = new Set(['defs', 'style', 'title', 'desc', 'metadata', 'script']);
 
+// Every id already present in a document. Used to keep freshly generated ids from
+// colliding with a project that's already open.
+export function collectElementIds(svgSource: string): string[] {
+  const doc = new DOMParser().parseFromString(svgSource, 'image/svg+xml');
+  if (doc.querySelector('parsererror')) return [];
+  return Array.from(doc.querySelectorAll('[id]')).map(el => el.getAttribute('id')!);
+}
+
 export function stripIds(svgText: string): string {
   const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
   doc.documentElement.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
@@ -91,6 +99,49 @@ export function groupElementsInSvg(
   for (const el of targets) group.appendChild(el);
 
   return new XMLSerializer().serializeToString(root);
+}
+
+// Deep-copies the given elements, dropping each copy directly above its original
+// so the duplicate sits one step higher in the z-order. Every copied element —
+// including everything nested inside a group — gets a fresh id; the returned map
+// goes from each original element id to its copy's, which is what lets the caller
+// rebuild the matching layers.
+export function duplicateElementsInSvg(
+  svgSource: string,
+  elementIds: string[]
+): { source: string; idMap: Map<string, string> } {
+  const doc = new DOMParser().parseFromString(svgSource, 'image/svg+xml');
+  const root = doc.documentElement;
+  const taken = new Set(Array.from(doc.querySelectorAll('[id]')).map(el => el.getAttribute('id')!));
+
+  const stamp = Date.now().toString(36);
+  let counter = 0;
+  function freshId(): string {
+    let id = `svga-copy-${stamp}-${counter++}`;
+    while (taken.has(id)) id = `svga-copy-${stamp}-${counter++}`;
+    taken.add(id);
+    return id;
+  }
+
+  const wanted = new Set(elementIds);
+  const targets = Array.from(root.querySelectorAll('[id]')).filter(el =>
+    wanted.has(el.getAttribute('id')!)
+  );
+
+  const idMap = new Map<string, string>();
+  for (const el of targets) {
+    const clone = el.cloneNode(true) as Element;
+    for (const node of [clone, ...Array.from(clone.querySelectorAll('[id]'))]) {
+      const old = node.getAttribute('id');
+      if (!old) continue;
+      const fresh = freshId();
+      idMap.set(old, fresh);
+      node.setAttribute('id', fresh);
+    }
+    el.parentNode!.insertBefore(clone, el.nextSibling);
+  }
+
+  return { source: new XMLSerializer().serializeToString(root), idMap };
 }
 
 // Dissolves a user group, leaving its children in place at the group's position.

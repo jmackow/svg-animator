@@ -465,12 +465,14 @@ const POPUP_W = 240;
 
 function ColorPickerPopup({
   hex, opacity, mode, gradient, anchor, label,
-  onClose, onHexChange, onOpacityChange, onModeChange, onGradientChange,
+  onClose, onHexChange, onOpacityChange, onModeChange, onGradientChange, onEditStart,
 }: {
   hex: string; opacity: number; mode: 'solid' | 'gradient';
   gradient: GradientDef | null; anchor: { x: number; y: number }; label: string;
   onClose: () => void; onHexChange: (h: string) => void; onOpacityChange: (v: number) => void;
   onModeChange: (m: 'solid' | 'gradient') => void; onGradientChange: (g: GradientDef) => void;
+  // Called once when a drag begins, so the whole drag is one undo step.
+  onEditStart: () => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
   const svRef = useRef<HTMLDivElement>(null);
@@ -503,6 +505,7 @@ function ColorPickerPopup({
 
   function startSvDrag(e: React.MouseEvent) {
     e.preventDefault();
+    onEditStart();
     const el = svRef.current;
     if (!el) return;
     function update(ev: MouseEvent) {
@@ -522,6 +525,7 @@ function ColorPickerPopup({
 
   function startHueDrag(e: React.MouseEvent) {
     e.preventDefault();
+    onEditStart();
     const el = hueRef.current;
     if (!el) return;
     function update(ev: MouseEvent) {
@@ -540,6 +544,7 @@ function ColorPickerPopup({
 
   function startAlphaDrag(e: React.MouseEvent) {
     e.preventDefault();
+    onEditStart();
     const el = alphaRef.current;
     if (!el) return;
     function update(ev: MouseEvent) {
@@ -599,6 +604,7 @@ function ColorPickerPopup({
                   if (val.length === 6) {
                     const newHex = `#${val}`;
                     setHsv(hexToHsv(newHex));
+                    onEditStart();
                     onHexChange(newHex);
                   }
                 }}
@@ -613,7 +619,10 @@ function ColorPickerPopup({
                 onChange={e => {
                   setAlphaInput(e.target.value);
                   const n = parseInt(e.target.value);
-                  if (!isNaN(n)) onOpacityChange(Math.max(0, Math.min(100, n)) / 100);
+                  if (!isNaN(n)) {
+                    onEditStart();
+                    onOpacityChange(Math.max(0, Math.min(100, n)) / 100);
+                  }
                 }}
               />
             </div>
@@ -660,6 +669,12 @@ function ColorRow({ layerId, property }: { layerId: string; property: 'fillColor
 
   const swatchBg = mode === 'gradient' && gradient ? gradientCss(gradient) : displayHex;
 
+  // The picker's sliders fire on every mouse move, so all writes from here are
+  // silent and the drag takes a single snapshot up front via beginEdit().
+  function beginEdit() {
+    dispatch({ type: 'PUSH_SNAPSHOT' });
+  }
+
   function handleColorChange(hex: string) {
     const packed = packColor(hex);
     // A layer with no colour keyframes stores its colour as a default attribute
@@ -670,22 +685,22 @@ function ColorRow({ layerId, property }: { layerId: string; property: 'fillColor
       if (!l || l.locked) continue;
       const kf = l.tracks[property].find(k => Math.abs(k.time - state.currentTime) < 0.001);
       if (kf) {
-        dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME', layerId: id, property, keyframeId: kf.id, value: packed });
+        dispatch({ type: 'UPDATE_PROPERTY_KEYFRAME_SILENT', layerId: id, property, keyframeId: kf.id, value: packed });
       } else if (l.tracks[property].length === 0) {
         dispatch({ type: 'SET_LAYER_DEFAULT_COLORS', layerId: id, [defaultColorKey]: hex });
       } else {
         dispatch({
-          type: 'ADD_PROPERTY_KEYFRAME',
+          type: 'ADD_PROPERTY_KEYFRAME_SILENT',
           layerId: id,
           property,
-          keyframe: { id: `kf-${Date.now()}-${Math.random().toString(36).slice(2)}`, time: state.currentTime, value: packed, easing: DEFAULT_EASING },
+          keyframe: { id: `kf-${Date.now()}-${Math.random().toString(36).slice(2)}-${id}`, time: state.currentTime, value: packed, easing: DEFAULT_EASING },
         });
       }
     }
   }
 
   function handleOpacityChange(val: number) {
-    setPropertyOnSelection(layerId, opacityProperty, val);
+    setPropertyOnSelection(layerId, opacityProperty, val, { continuing: true });
   }
 
   function setMode(m: 'solid' | 'gradient') {
@@ -754,6 +769,7 @@ function ColorRow({ layerId, property }: { layerId: string; property: 'fillColor
           onClose={() => setPickerOpen(false)}
           onHexChange={handleColorChange}
           onOpacityChange={handleOpacityChange}
+          onEditStart={beginEdit}
           onModeChange={setMode}
           onGradientChange={g => dispatch({ type: 'SET_LAYER_GRADIENT', layerId, target, gradient: g })}
         />

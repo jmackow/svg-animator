@@ -5,7 +5,7 @@ import { emptyTracks } from '../context/AppContext';
 import ThemePicker from './ThemePicker';
 import { parseSvgLayers, flattenProjectLayers } from '../utils/svgParser';
 import { exportAnimatedSvg, downloadSvg, extractProjectMetadata } from '../utils/exporter';
-import { stripIds, appendSvgChildrenToExisting, appendRawElementToSvg, createMinimalSvg, extractSvgDimensions } from '../utils/svgDom';
+import { stripIds, appendSvgChildrenToExisting, appendRawElementToSvg, createMinimalSvg, extractSvgDimensions, collectElementIds } from '../utils/svgDom';
 import { importAnimations, mergeImportedTracks, stripAnimationMarkup } from '../utils/animationImporter';
 import { Layer } from '../types';
 
@@ -67,7 +67,11 @@ export default function Toolbar() {
           }
         } else {
           const stripped = stripIds(text);
-          const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
+          // Hand over the open document's ids so the imported shapes get their own.
+          const { layers: newLayers, source: newSource } = parseSvgLayers(
+            stripped,
+            collectElementIds(state.svgSource)
+          );
           const { layerTracks, maxDuration, strippedSource } = importAnimations(newSource, newLayers);
           const finalNewLayers = mergeImportedTracks(newLayers, layerTracks);
           const mergedSvg = appendSvgChildrenToExisting(state.svgSource, strippedSource);

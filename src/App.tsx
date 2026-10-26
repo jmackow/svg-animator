@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppProvider, useApp, emptyTracks } from './context/AppContext';
-import { AnimatableProperty, EasingConfig, PathPoint, ALL_PROPERTIES } from './types';
-import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting, extractSvgDimensions, groupElementsInSvg, ungroupElementInSvg } from './utils/svgDom';
+import { AnimatableProperty, EasingConfig, PathPoint, ALL_PROPERTIES, Layer } from './types';
+import { removeElementsFromSvg, stripIds, appendSvgChildrenToExisting, extractSvgDimensions, groupElementsInSvg, ungroupElementInSvg, collectElementIds, duplicateElementsInSvg } from './utils/svgDom';
 import { parseSvgLayers, flattenProjectLayers } from './utils/svgParser';
 import { extractProjectMetadata } from './utils/exporter';
 import { importAnimations, mergeImportedTracks, stripAnimationMarkup } from './utils/animationImporter';
@@ -56,7 +56,11 @@ function KeyboardShortcuts() {
           if (dims) dispatch({ type: 'SET_CANVAS_SIZE', width: dims.width, height: dims.height });
         } else {
           const stripped = stripIds(svgText);
-          const { layers: newLayers, source: newSource } = parseSvgLayers(stripped);
+          // Hand over the open document's ids so the pasted shapes get their own.
+          const { layers: newLayers, source: newSource } = parseSvgLayers(
+            stripped,
+            collectElementIds(state.svgSource)
+          );
           const { layerTracks, maxDuration, strippedSource } = importAnimations(newSource, newLayers);
           const finalNewLayers = mergeImportedTracks(newLayers, layerTracks);
           const mergedSvg = appendSvgChildrenToExisting(state.svgSource, strippedSource);
@@ -106,6 +110,39 @@ function KeyboardShortcuts() {
         }
         dispatch({ type: 'SELECT_KEYFRAMES', kfs: allKfs });
         dispatch({ type: 'SELECT_PATH_KEYFRAMES', kfIds: allPathKfIds });
+        return;
+      }
+
+      // Cmd/Ctrl+D duplicates the selection, copy landing just above the original.
+      if (meta && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        if (!state.svgSource || state.selectedLayerIds.length === 0) return;
+
+        // Duplicating a group already brings its children along, so drop any
+        // selected layer that sits inside another selected one.
+        const selected = new Set(state.selectedLayerIds);
+        const nestedInSelection = (layer: Layer) => {
+          let pid = layer.parentId;
+          let guard = 0;
+          while (pid && guard++ < 50) {
+            if (selected.has(pid)) return true;
+            pid = state.layers.find(l => l.id === pid)?.parentId;
+          }
+          return false;
+        };
+        const roots = state.layers.filter(l => selected.has(l.id) && !nestedInSelection(l));
+        if (roots.length === 0) return;
+
+        const { source, idMap } = duplicateElementsInSvg(
+          state.svgSource,
+          roots.map(l => l.elementId)
+        );
+        dispatch({
+          type: 'DUPLICATE_LAYERS',
+          sourceLayerIds: roots.map(l => l.id),
+          idMap,
+          newSvgSource: source,
+        });
         return;
       }
 

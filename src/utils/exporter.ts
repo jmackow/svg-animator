@@ -182,7 +182,15 @@ export function exportAnimatedSvg(
     const hasAny = ALL_PROPERTIES.some((p) => layer.tracks[p].length >= 2);
     const hasGradient = !!(layer.fillGradient || layer.strokeGradient);
     const hasPathKfs = (layer.pathKeyframes?.length ?? 0) >= 2;
-    if (!hasAny && !hasGradient && !hasPathKfs) continue;
+    // A property with no keyframes holds its value in baseValues instead. That's
+    // where a static transform lives — rotating a group without keyframing it, for
+    // instance — so those layers have to be emitted too, or the transform is lost.
+    const hasStatic = ALL_PROPERTIES.some(
+      p => layer.tracks[p].length === 0 &&
+           layer.baseValues?.[p] !== undefined &&
+           layer.baseValues[p] !== PROPERTY_DEFAULTS[p]
+    );
+    if (!hasAny && !hasGradient && !hasPathKfs && !hasStatic) continue;
 
     // Shape / anchor-point animation — SMIL works universally (Chrome, Firefox, Safari)
     if (hasPathKfs) {
@@ -200,7 +208,7 @@ export function exportAnimatedSvg(
       el.setAttribute('stroke', embedGradient(doc, svgEl, gradId, layer.strokeGradient));
     }
 
-    if (!hasAny) continue;
+    if (!hasAny && !hasStatic) continue;
 
     const varNames: Partial<Record<AnimatableProperty, string>> = {};
     const animParts: string[] = [];
@@ -241,18 +249,25 @@ export function exportAnimatedSvg(
       }
     }
 
+    // Static value for a property that isn't animated: the layer's own base value
+    // if it set one, otherwise the global default.
+    function base(p: AnimatableProperty): number {
+      const b = layer.baseValues?.[p];
+      return b !== undefined && layer.tracks[p].length === 0 ? b : PROPERTY_DEFAULTS[p];
+    }
+
     function v(p: AnimatableProperty, unit: string): string {
       return varNames[p]
         ? `calc(var(${varNames[p]}) * 1${unit})`
-        : `${PROPERTY_DEFAULTS[p]}${unit}`;
+        : `${base(p)}${unit}`;
     }
 
     const extraRules: string[] = [];
 
     // Trim path CSS
     if (trimTotalLength !== null) {
-      const tsVar = varNames['trimStart'] ? `var(${varNames['trimStart']})` : `${PROPERTY_DEFAULTS.trimStart}`;
-      const teVar = varNames['trimEnd'] ? `var(${varNames['trimEnd']})` : `${PROPERTY_DEFAULTS.trimEnd}`;
+      const tsVar = varNames['trimStart'] ? `var(${varNames['trimStart']})` : `${base('trimStart')}`;
+      const teVar = varNames['trimEnd'] ? `var(${varNames['trimEnd']})` : `${base('trimEnd')}`;
       const tl = trimTotalLength;
       extraRules.push(`  stroke-dasharray: calc((${teVar} - ${tsVar}) * ${tl}px) ${tl}px;`);
       extraRules.push(`  stroke-dashoffset: calc(-1 * ${tsVar} * ${tl}px);`);
@@ -279,19 +294,20 @@ export function exportAnimatedSvg(
           animParts.push(`svga_motionOffset_${cssId(layer.elementId)} ${duration}s linear`);
         }
       }
-      const moVar = varNames['motionOffset'] ? `var(${varNames['motionOffset']})` : `${PROPERTY_DEFAULTS.motionOffset}`;
+      const moVar = varNames['motionOffset'] ? `var(${varNames['motionOffset']})` : `${base('motionOffset')}`;
       extraRules.push(`  offset-path: path('${mp.d}');`);
       extraRules.push(`  offset-distance: calc(${moVar} * 100%);`);
       extraRules.push(`  offset-rotate: ${(layer.autoRotate ?? false) ? 'auto' : '0deg'};`);
     }
 
-    if (animParts.length === 0) continue;
+    // With no animation there may still be a static transform to carry over.
+    if (animParts.length === 0 && !hasStatic) continue;
 
     // Build transform values
     const tx = v('x', 'px'), ty = v('y', 'px'), rot = v('rotation', 'deg');
-    const sx = varNames['scaleX'] ? `var(${varNames['scaleX']})` : `${PROPERTY_DEFAULTS.scaleX}`;
-    const sy = varNames['scaleY'] ? `var(${varNames['scaleY']})` : `${PROPERTY_DEFAULTS.scaleY}`;
-    const op = varNames['opacity'] ? `var(${varNames['opacity']})` : `${PROPERTY_DEFAULTS.opacity}`;
+    const sx = varNames['scaleX'] ? `var(${varNames['scaleX']})` : `${base('scaleX')}`;
+    const sy = varNames['scaleY'] ? `var(${varNames['scaleY']})` : `${base('scaleY')}`;
+    const op = varNames['opacity'] ? `var(${varNames['opacity']})` : `${base('opacity')}`;
 
     // Motion path origin adjustment (same calc as applyTransforms in Canvas.tsx)
     const adj = mp ? (motionAdjustments.get(layer.id) ?? { x: 0, y: 0 }) : { x: 0, y: 0 };
@@ -307,8 +323,15 @@ export function exportAnimatedSvg(
 
     const extraCss = extraRules.length > 0 ? '\n' + extraRules.join('\n') : '';
 
+    // A purely static layer gets the same rule minus the animation declarations.
+    const animCss = animParts.length > 0
+      ? `  animation: ${animParts.join(', ')};\n` +
+        `  animation-iteration-count: ${loop === 'infinite' ? 'infinite' : '1'};\n` +
+        `  animation-fill-mode: ${loop === 'infinite' ? 'none' : 'forwards'};\n`
+      : '';
+
     cssBlocks.push(
-      `#${CSS.escape(layer.elementId)} {\n  animation: ${animParts.join(', ')};\n  animation-iteration-count: ${loop === 'infinite' ? 'infinite' : '1'};\n  animation-fill-mode: ${loop === 'infinite' ? 'none' : 'forwards'};\n  transform-box: fill-box;\n  transform-origin: ${transformOrigin};\n  transform: translate(${txFull}, ${tyFull}) rotate(${rot}) scale(${sx}, ${sy});\n  opacity: ${op};${extraCss}\n}`
+      `#${CSS.escape(layer.elementId)} {\n${animCss}  transform-box: fill-box;\n  transform-origin: ${transformOrigin};\n  transform: translate(${txFull}, ${tyFull}) rotate(${rot}) scale(${sx}, ${sy});\n  opacity: ${op};${extraCss}\n}`
     );
   }
 
